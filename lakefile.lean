@@ -40,3 +40,5 @@ lean_exe Tests.DiffCli
 lean_exe Tests.VCVio.Smoke
 
 lean_exe Tests.VCVio.Hash
+
+lean_exe Tests.VCVio.Ed25519Det

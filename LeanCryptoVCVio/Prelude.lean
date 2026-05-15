@@ -1,4 +1,4 @@
-import VCVio.OracleComp.OracleSpec
+import VCVio.OracleComp.SimSemantics.SimulateQ
 import LeanCrypto
 
 /-!
@@ -6,17 +6,25 @@ import LeanCrypto
 
 Shared imports and namespace setup for the `LeanCryptoVCVio` library.
 Brings `LeanCrypto` (our pure-functional implementation) into scope alongside
-the minimum slice of VCV-io needed for the wrapper. The import surface widens
-in later milestones:
+the slice of VCV-io that the wrapper currently uses:
 
-* M13 (this file): just `VCVio.OracleComp.OracleSpec` — proves the
-  dependency wiring resolves end-to-end.
-* M14: pulls in `VCVio.OracleComp.OracleComp` once the deterministic
-  adapters need `pure`/`bind` over `OracleComp`.
-* M15/M16: adds `VCVio.CryptoFoundations.SignatureAlg` and
-  `VCVio.OracleComp.QueryTracking.RandomOracle` for the `SignatureAlg`
-  instance and the ROM-modeled SHA-512 variant.
+* `OracleSpec`, `OracleComp` — the free-monad framework.
+* `QueryImpl`, `simulateQ` — needed to interpret the deterministic
+  adapters back to their pure values for testing.
+
+The import surface widens further in later milestones:
+
+* M15: adds `VCVio.CryptoFoundations.SignatureAlg` for the
+  `SignatureAlg` instance.
+* M16: adds `VCVio.OracleComp.QueryTracking.RandomOracle` for the
+  SHA-512-as-RandomOracle variant.
 -/
 
 namespace LeanCryptoVCVio
+
+/-- Vacuous `QueryImpl` for the empty oracle spec: there is no query to
+implement because the spec's domain is `PEmpty`. Used as the trivial
+interpreter when running the deterministic adapters under `simulateQ`. -/
+@[reducible] def emptyImpl : QueryImpl []ₒ Id := fun x => x.elim
+
 end LeanCryptoVCVio

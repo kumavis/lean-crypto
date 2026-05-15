@@ -38,3 +38,5 @@ lean_exe Tests.WycheproofTest
 lean_exe Tests.DiffCli
 
 lean_exe Tests.VCVio.Smoke
+
+lean_exe Tests.VCVio.Hash

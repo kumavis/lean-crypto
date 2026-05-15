@@ -7,18 +7,19 @@ See `docs/VCV_IO_PLAN.md` for the design.
 
 ---
 
-## M12 · Toolchain bump to Lean 4.28.0 — small
+## M12 · Toolchain bump to Lean 4.29.0 — small
 
-**Goal.** Existing code compiles and every test passes on Lean 4.28.0. No
-new features, no new deps.
+**Goal.** Existing code compiles and every test passes on Lean 4.29.0. No
+new features, no new deps. (Originally planned at 4.28.0; bumped one minor
+during M13 wiring to match VCV-io's latest tag.)
 
 **Deliverables.**
-- `lean-toolchain` → `leanprover/lean4:v4.28.0`.
+- `lean-toolchain` → `leanprover/lean4:v4.29.0`.
 - Fix any compile errors surfaced by the bump.
 - All M1–M11 deliverables continue to pass.
 
 **Acceptance.**
-- `lake build` succeeds on a clean checkout against 4.28.0.
+- `lake build` succeeds on a clean checkout against 4.29.0.
 - Every existing test exe exits 0.
 - Differential fuzz (`tests/diff/run.sh`) still passes.
 - CI green.
@@ -32,8 +33,8 @@ new features, no new deps.
 
 **Deliverables.**
 - `lakefile.lean`:
-  - `require mathlib from git "https://github.com/leanprover-community/mathlib4" @ "v4.28.0"`.
-  - `require VCVio from git "https://github.com/dtumad/VCV-io" @ "<pin>"`.
+  - `require "leanprover-community" / "mathlib" @ git "v4.29.0"`.
+  - `require VCVio from git "https://github.com/dtumad/VCV-io" @ "v4.29.0"`.
   - `lean_lib LeanCryptoVCVio` with `buildType := .release`.
 - `LeanCryptoVCVio.lean` (root, empty re-exports).
 - `LeanCryptoVCVio/Prelude.lean` — imports VCV-io / Mathlib, defines `drawBytes`.

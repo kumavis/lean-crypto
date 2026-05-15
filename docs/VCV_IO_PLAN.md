@@ -56,27 +56,24 @@ Tests/VCVio/
 ## 3. Lakefile / dependencies
 
 ```lean
-require mathlib from git
-  "https://github.com/leanprover-community/mathlib4" @ "v4.28.0"
-
-require VCVio from git
-  "https://github.com/dtumad/VCV-io" @ "<commit sha pinned at M13>"
+require "leanprover-community" / "mathlib" @ git "v4.29.0"
+require VCVio from git "https://github.com/dtumad/VCV-io" @ "v4.29.0"
 
 lean_lib LeanCryptoVCVio where
   buildType := BuildType.release
 ```
 
-VCV-io is unreleased (no semver). We pin a specific commit SHA via
-`lake-manifest.json` and bump it explicitly when we want a new version.
+VCV-io tags a release matching each Mathlib bump (we use `v4.29.0`). Bumps
+land via lakefile edits + `lake update`.
 
 ---
 
 ## 4. Toolchain bump (M12 precursor)
 
-VCV-io is on Lean 4.28.0 + Mathlib 4.28.0; we're on 4.27.0. The bump is a
-**standalone PR** before the wrapper work starts.
+VCV-io's `v4.29.0` tag pins Lean 4.29.0 + Mathlib 4.29.0; we're on 4.27.0.
+The bump is a **standalone PR** before the wrapper work starts.
 
-- Update `lean-toolchain` to `leanprover/lean4:v4.28.0`.
+- Update `lean-toolchain` to `leanprover/lean4:v4.29.0`.
 - Run `lake build` on everything we have today; fix any breaks (likely
   small — `Array.modify` or `String.trim`-style API tweaks).
 - Re-run NIST CAVP, RFC 8032, Wycheproof, and the differential fuzz harness.
@@ -226,8 +223,9 @@ of every push.
 
 ## 9. Risks
 
-- **VCV-io API churn.** No stable release. Pin a SHA in `lake-manifest.json`;
-  budget time per bump. If breaking changes are frequent, vendor a snapshot.
+- **VCV-io API churn.** Tag-per-toolchain (e.g. `v4.29.0`) gives a stable
+  pin per Mathlib version; bumps happen alongside our own toolchain bumps.
+  If breaking changes between tags become frequent, vendor a snapshot.
 - **`PerfectlyComplete` proof of `verify_sign_self`.** Proving universal
   completeness of our own Ed25519 implementation may be harder than expected.
   Fallback: per-vector `Decidable.decide` blocks. Flagged in M15.
@@ -255,4 +253,5 @@ of every push.
 3. **CI:** Gated job with `lake exe cache get`. Falls back to nightly if
    `cache get` becomes unreliable.
 4. **Toolchain bump:** Standalone precursor PR (M12) before wrapper work.
-5. **VCV-io pin:** Specific commit SHA in `lake-manifest.json`. Manual bumps.
+5. **VCV-io pin:** Tag-per-toolchain (e.g. `v4.29.0`); bump together with
+   our Lean / Mathlib bumps.

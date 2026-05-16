@@ -44,3 +44,5 @@ lean_exe Tests.VCVio.Hash
 lean_exe Tests.VCVio.Ed25519Det
 
 lean_exe Tests.VCVio.Ed25519ROM
+
+lean_exe Tests.VCVio.GameSmoke

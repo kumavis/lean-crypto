@@ -33,7 +33,7 @@ jobs:
           set -e
           ! grep -RInE '^\s*(sorry|partial def|unsafe def|@\[extern[^]]*\])\b' \
               --include='*.lean' \
-              LeanCrypto LeanCryptoVCVio Tests
+              LeanCrypto LeanCryptoVCVio LeanCryptoProofs Tests
           echo "OK no forbidden tokens"
 
       - name: Core LeanCrypto stays Mathlib/VCVio-free
@@ -44,8 +44,34 @@ jobs:
               LeanCrypto LeanCrypto.lean
           echo "OK no Mathlib/VCVio imports in core"
 
-      - name: Build core
-        run: lake build LeanCrypto $(grep -oE 'lean_exe\s+\S+' lakefile.lean | awk '{print $2}' | grep -v '^Tests\.VCVio')
+      - name: Resolve dependencies (lake update)
+        run: |
+          set -ex
+          lake update 2>&1 | tee /tmp/lake-update.log | tail -40 || {
+            echo "## lake update failed" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            tail -200 /tmp/lake-update.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+
+      - name: Build core (LeanCrypto + non-VCVio test exes)
+        run: |
+          set -ex
+          TARGETS="LeanCrypto Tests.HelloTest Tests.BytesTest \
+                   Tests.Sha256Test Tests.Sha512Test \
+                   Tests.Fp25519Test Tests.ScalarLTest \
+                   Tests.Edwards25519Test Tests.Ed25519Test \
+                   Tests.WycheproofTest Tests.DiffCli"
+          if ! lake build $TARGETS 2>&1 | tee /tmp/build-core.log; then
+            {
+              echo "## Build core failed (last 200 lines)"
+              echo '```'
+              tail -200 /tmp/build-core.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       - name: Run core test executables
         run: |
@@ -71,7 +97,16 @@ jobs:
 
       - name: Differential fuzz (Lean vs Python hashlib + Node ed25519)
         run: |
-          ./tests/diff/run.sh
+          set -ex
+          if ! ./tests/diff/run.sh 2>&1 | tee /tmp/fuzz.log; then
+            {
+              echo "## Differential fuzz failed (last 200 lines)"
+              echo '```'
+              tail -200 /tmp/fuzz.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
   vcvio-build:
     runs-on: ubuntu-latest
@@ -92,30 +127,62 @@ jobs:
           restore-keys: |
             lake-vcvio-${{ runner.os }}-
 
-      - name: Fetch VCV-io submodules (ML-KEM / ML-DSA / Falcon native C)
+      - name: Resolve dependencies (lake update)
         run: |
-          set -e
-          if [ -d .lake/packages/VCVio ]; then
-            git -C .lake/packages/VCVio submodule update --init --depth 1
-          else
-            echo "VCVio package not yet fetched; lake update will handle it"
+          set -ex
+          if ! lake update 2>&1 | tee /tmp/lake-update.log; then
+            {
+              echo "## lake update failed (last 200 lines)"
+              echo '```'
+              tail -200 /tmp/lake-update.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
 
-      - name: Fetch dependencies (lake update writes lake-manifest.json)
-        run: lake update
-
       - name: Fetch Mathlib precompiled olean cache
-        run: lake exe cache get
+        run: |
+          set -ex
+          if ! lake exe cache get 2>&1 | tee /tmp/cache-get.log; then
+            {
+              echo "## lake exe cache get failed (last 200 lines)"
+              echo '```'
+              tail -200 /tmp/cache-get.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
-      - name: Fetch VCV-io submodules (post-update)
-        run: git -C .lake/packages/VCVio submodule update --init --depth 1
+      - name: Fetch VCV-io submodules (ML-KEM / ML-DSA / Falcon native C)
+        run: |
+          set -ex
+          # lake update has cloned VCVio into .lake/packages/VCVio; init its submodules.
+          git -C .lake/packages/VCVio submodule update --init --depth 1
 
       - name: Build LeanCryptoVCVio + Tests.VCVio.*
         run: |
-          set -e
-          lake build LeanCryptoVCVio
-          for tgt in $(grep -oE 'lean_exe\s+Tests\.VCVio\.\S+' lakefile.lean | awk '{print $2}'); do
-            lake build "$tgt"
+          set -ex
+          if ! lake build LeanCryptoVCVio 2>&1 | tee /tmp/build-vcvio.log; then
+            {
+              echo "## lake build LeanCryptoVCVio failed (last 300 lines)"
+              echo '```'
+              tail -300 /tmp/build-vcvio.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          for tgt in Tests.VCVio.Smoke Tests.VCVio.Hash \
+                     Tests.VCVio.Ed25519Det Tests.VCVio.Ed25519ROM \
+                     Tests.VCVio.GameSmoke; do
+            if ! lake build "$tgt" 2>&1 | tee /tmp/build-$tgt.log; then
+              {
+                echo "## lake build $tgt failed (last 200 lines)"
+                echo '```'
+                tail -200 /tmp/build-$tgt.log
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
           done
 
       - name: Run Tests-VCVio-* executables

@@ -103,15 +103,51 @@ lemma add_zero_right_crossEq (q : EdPoint) : CrossEq (add q identity) q := by
                castZMod_fp25519_sub, Nat.cast_one]
     ring
 
-/-! ## `add P (negate P)` for `P` on the curve
+/-! ## `add P (negate P)` for `P` on the curve -/
 
-The Y-component of this lemma needs the curve equation as a side
-hypothesis and a non-trivial polynomial witness for `linear_combination`.
-The implementation friction here (`linarith` doesn't work over `ZMod p`;
-the post-`simp` form has un-normalised `↑2` / `↑(2·d)` casts that confuse
-`linear_combination`'s coefficient inference) is exactly the M23
-associativity probe in miniature. Deferred to a follow-up alongside
-M23; the easy zero-identity lemmas above are the M22 deliverable. -/
+/-- For any point on the curve, `add P (negate P) ≡_cross identity`.
+First lemma in this file requiring the curve equation as a side
+hypothesis. The Y-component goal reduces to
+
+  `4·(Z² − d·T²) · ((Y² − X²) − (Z² + d·T²)) = 0`
+
+after expansion; the bracketed factor is `(LHS − RHS)` of `hq`, so the
+linear-combination witness is `4·(Z² − d·T²)`. The plumbing dance:
+
+* `linear_combination` needs the coefficient ascribed to `ZMod p`
+  explicitly (otherwise the outer `4` is parsed as `Nat` and gets
+  stripped, with the linter warning "this constant has no effect").
+* The post-`simp` goal has un-normalised casts (`↑2`, `↑(2·d)`);
+  `push_cast` normalises them so `ring` can close the residual.
+* The hypothesis comes in as `-X² + Y² = Z² + d·T²`; rearranging to
+  `Y² − X² = Z² + d·T²` (the form that matches the bracketed factor)
+  needs `linear_combination this` rather than `linarith` (which
+  doesn't apply over `ZMod p`). -/
+lemma add_negate_cancel_crossEq (q : EdPoint) (hq : OnCurve q) :
+    CrossEq (add q (negate q)) identity := by
+  refine ⟨?_, ?_⟩
+  · -- First component: (add P (-P)).X = 0, identity.X = 0 — both sides 0.
+    show ((_ : Nat) : ZMod p) * _ = _ * ((_ : Nat) : ZMod p)
+    simp only [add, negate, identity, k2d, castZMod_fp25519_mul,
+               castZMod_fp25519_add, castZMod_fp25519_sub,
+               castZMod_fp25519_neg, Nat.cast_one]
+    ring
+  · -- Second component: the polynomial identity above. Goal at this
+    -- point is `(2Z² − 2d·T²)·2(Y² − X²) · 1 = 1 · (2Z² + 2d·T²)(2Z² − 2d·T²)`
+    -- after pushing the cast through. We rearrange `hq` into
+    -- `Y² − X² = Z² + d·T²` form, then dispatch with the explicit
+    -- witness via `linear_combination`.
+    show ((_ : Nat) : ZMod p) * _ = _ * ((_ : Nat) : ZMod p)
+    simp only [add, negate, identity, k2d, castZMod_fp25519_mul,
+               castZMod_fp25519_add, castZMod_fp25519_sub,
+               castZMod_fp25519_neg, Nat.cast_one]
+    push_cast
+    have hq' : (q.Y : ZMod p)^2 - (q.X : ZMod p)^2
+                = (q.Z : ZMod p)^2 + (d : ZMod p) * (q.T : ZMod p)^2 := by
+      unfold OnCurve at hq
+      linear_combination hq
+    linear_combination
+      ((4 : ZMod p) * ((q.Z : ZMod p)^2 - (d : ZMod p) * (q.T : ZMod p)^2)) * hq'
 
 end EdPoint
 end LeanCrypto.Curve.Edwards25519

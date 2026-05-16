@@ -20,5 +20,9 @@ lake build Tests.DiffCli >/dev/null
 echo ":: sha256/sha512 vs Python hashlib (n_per_length=$SHA_N, seed=$SEED)"
 python3 tests/diff/diff_sha.py "$SHA_N" "$SEED"
 
+SHA_CHUNKS_N="${4:-4}"
+echo ":: sha256/sha512 streaming chunk-invariant vs Python hashlib (n_per_length=$SHA_CHUNKS_N, seed=$SEED)"
+python3 tests/diff/diff_sha_chunks.py "$SHA_CHUNKS_N" "$SEED"
+
 echo ":: ed25519 vs Node crypto (pairs=$ED_N, seed=$SEED)"
 python3 tests/diff/diff_ed25519.py "$ED_N" "$SEED"

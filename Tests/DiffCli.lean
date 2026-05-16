@@ -15,12 +15,18 @@ per command. The driver scripts in `tests/diff/` spawn this binary once per
 fuzz run and feed it many commands, avoiding subprocess fork overhead.
 
 Commands:
-  `sha256 <hex>`                                  → digest hex
-  `sha512 <hex>`                                  → digest hex
+  `sha256 <hex>`                                  → digest hex (one-shot)
+  `sha512 <hex>`                                  → digest hex (one-shot)
+  `sha256-chunks <hex1> <hex2> ... <hexN>`        → digest hex (streaming)
+  `sha512-chunks <hex1> <hex2> ... <hexN>`        → digest hex (streaming)
   `ed25519-pubkey <sk-hex>`                       → 32-byte pubkey hex
   `ed25519-sign <sk-hex> <msg-hex>`               → 64-byte sig hex
   `ed25519-verify <pk-hex> <sig-hex> <msg-hex>`   → `true` or `false`
   `ed25519-verify-zip215 <pk-hex> <sig-hex> <msg-hex>` → `true` or `false`
+
+The streaming commands accept 0 or more chunks (zero chunks ⇒ digest of
+the empty message). Each chunk argument is independent hex; concatenating
+all chunks yields the equivalent one-shot input.
 
 Errors are emitted as `ERR <reason>` on a single line. -/
 
@@ -28,6 +34,27 @@ private def hexOr (label : String) (s : String) (k : ByteArray → String) : Str
   match hexToBytes s with
   | some b => k b
   | none => s!"ERR bad-hex({label}): {s}"
+
+/-- Decode a list of hex chunks; returns `none` on first bad chunk. -/
+private def hexChunks (hexes : List String) : Option (List ByteArray) :=
+  hexes.foldr (init := some []) fun h acc => do
+    let bs ← hexToBytes h
+    let rest ← acc
+    return bs :: rest
+
+/-- SHA-256 over a sequence of chunks via the streaming API. -/
+private def sha256Streaming (chunks : List ByteArray) : ByteArray :=
+  let ctx := chunks.foldl
+    (init := LeanCrypto.Hash.SHA256.Sha256Ctx.init)
+    (fun c chunk => c.update chunk)
+  ctx.finalize
+
+/-- SHA-512 over a sequence of chunks via the streaming API. -/
+private def sha512Streaming (chunks : List ByteArray) : ByteArray :=
+  let ctx := chunks.foldl
+    (init := LeanCrypto.Hash.SHA512.Sha512Ctx.init)
+    (fun c chunk => c.update chunk)
+  ctx.finalize
 
 def respond (line : String) : String :=
   -- Split on a single space; do NOT trim, so an empty hex arg (after a
@@ -37,6 +64,14 @@ def respond (line : String) : String :=
   match parts with
   | ["sha256", h] => hexOr "msg" h (fun b => bytesToHex (sha256 b))
   | ["sha512", h] => hexOr "msg" h (fun b => bytesToHex (sha512 b))
+  | "sha256-chunks" :: hexes =>
+      match hexChunks hexes with
+      | some chunks => bytesToHex (sha256Streaming chunks)
+      | none => s!"ERR bad-hex(chunks): {line}"
+  | "sha512-chunks" :: hexes =>
+      match hexChunks hexes with
+      | some chunks => bytesToHex (sha512Streaming chunks)
+      | none => s!"ERR bad-hex(chunks): {line}"
   | ["ed25519-pubkey", sk] => hexOr "sk" sk (fun s => bytesToHex (derivePublicKey s))
   | ["ed25519-sign", sk, msg] =>
       hexOr "sk" sk fun s =>

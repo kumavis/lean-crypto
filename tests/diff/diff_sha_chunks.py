@@ -75,6 +75,49 @@ def random_partition(rng: random.Random, msg: bytes) -> list[bytes]:
     return chunks
 
 
+def byte_by_byte(msg: bytes) -> list[bytes]:
+    """Chunk msg into individual bytes — pathological worst case for the
+    buffer state machine."""
+    return [bytes([b]) for b in msg]
+
+
+def block_straddle(msg: bytes, block_size: int) -> list[bytes]:
+    """Chunk msg so every chunk straddles the next block boundary by 1 byte.
+    Forces the streaming buffer to alternate between partial-block hold
+    and block-emit on every update."""
+    if len(msg) == 0:
+        return []
+    chunks = []
+    pos = 0
+    # First chunk: block_size - 1 bytes
+    first = min(block_size - 1, len(msg))
+    chunks.append(msg[:first])
+    pos = first
+    while pos < len(msg):
+        # Each subsequent chunk: block_size bytes (straddles the next boundary)
+        remaining = len(msg) - pos
+        take = min(block_size, remaining)
+        chunks.append(msg[pos:pos + take])
+        pos += take
+    return chunks
+
+
+def zero_padded(rng: random.Random, msg: bytes) -> list[bytes]:
+    """Interleave the message bytes with explicit zero-length chunks.
+    Tests that update(b"") is a no-op and doesn't corrupt buffer state."""
+    if len(msg) == 0:
+        return [b"", b"", b""]
+    chunks = []
+    pos = 0
+    while pos < len(msg):
+        chunks.append(b"")
+        take = rng.randint(1, min(64, len(msg) - pos))
+        chunks.append(msg[pos:pos + take])
+        pos += take
+    chunks.append(b"")
+    return chunks
+
+
 def python_streaming(algo: str, chunks: list[bytes]) -> str:
     h = hashlib.sha256() if algo == "sha256" else hashlib.sha512()
     for c in chunks:
@@ -95,17 +138,28 @@ def main() -> int:
     rng = random.Random(seed)
 
     # Build all (algo, msg, chunks) cases up front, so we can batch the
-    # DiffCli commands.
+    # DiffCli commands. For each (algo, msg) we generate several chunking
+    # patterns: random partitions plus three adversarial ones.
     cases: list[tuple[str, bytes, list[bytes], str]] = []
     # (algo, msg, chunks, expected_hex)
     PARTITIONS_PER_MSG = 4
     for algo in ("sha256", "sha512"):
+        block_size = 64 if algo == "sha256" else 128
         for length in LENGTHS:
             for _ in range(n_per_length):
                 msg = rng.randbytes(length)
                 expected = python_oneshot(algo, msg)
-                for _ in range(PARTITIONS_PER_MSG):
-                    chunks = random_partition(rng, msg)
+                # 4 random partitions per msg
+                strategies: list[list[bytes]] = [
+                    random_partition(rng, msg) for _ in range(PARTITIONS_PER_MSG)
+                ]
+                # Adversarial chunkings (only for shorter messages — the
+                # byte-by-byte one explodes the case count otherwise)
+                if length <= 200:
+                    strategies.append(byte_by_byte(msg))
+                strategies.append(block_straddle(msg, block_size))
+                strategies.append(zero_padded(rng, msg))
+                for chunks in strategies:
                     py_streaming = python_streaming(algo, chunks)
                     if py_streaming != expected:
                         # Python streaming/one-shot disagree — should

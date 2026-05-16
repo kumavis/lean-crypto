@@ -93,7 +93,14 @@ def main() -> int:
     fails: list[str] = []
     for (algo, msg, expected), got in zip(cases, responses):
         if got != expected:
-            mh = msg.hex() if len(msg) <= 64 else msg.hex()[:64] + f"… ({len(msg)}B)"
+            # Truncate at 64 bytes (128 hex chars) for readability — the
+            # previous form sliced msg.hex()[:64] which is only 32 bytes
+            # and made the two branches identical at boundary lengths.
+            mh = (
+                msg.hex()
+                if len(msg) <= 64
+                else msg.hex()[:128] + f"… ({len(msg)}B)"
+            )
             fails.append(
                 f"  {algo} msg=({mh})\n    want {expected}\n    got  {got}"
             )

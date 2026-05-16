@@ -37,9 +37,11 @@ Net effect: 150/150 agree under both modes, with `zip215Divergence = 0`.
 If a future Wycheproof revision introduces cases isolating exactly the
 strict-vs-ZIP-215 distinction, the runner is set up to **tolerate** those
 ZIP-215 acceptances when the case carries flags from
-`zip215PermissibleFlags` (currently `InvalidEncoding`, `InvalidKtv`,
-`InvalidSignature`). It logs them as `zip215Divergence` and does not fail
-CI. Any other ZIP-215 disagreement is treated as a bug.
+`zip215PermissibleFlags` (currently just `InvalidEncoding`). It logs them
+as `zip215Divergence` and does not fail CI. Any other ZIP-215
+disagreement — including on `InvalidKtv` / `InvalidSignature` cases,
+which per the table above are equation-failure attacks that should
+reject under both modes — is treated as a bug.
 
 ## Source
 

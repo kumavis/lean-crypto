@@ -65,9 +65,17 @@ private def parseFile (text : String) : Except String (List WpGroup) := do
 /-- Flags whose `invalid` cases ZIP-215 may legitimately ACCEPT. These are
 the encoding/representation differences between strict RFC and ZIP-215;
 they don't represent security bugs in ZIP-215, they represent its
-documented permissiveness. -/
+documented permissiveness.
+
+Only `InvalidEncoding` is permissible — it covers non-canonical `R` / `pk`
+encodings, which ZIP-215 reduces mod p instead of rejecting outright.
+`InvalidKtv` (equation-failure attack vectors) and `InvalidSignature`
+(`S = 0` / `S = ℓ` etc.) should reject under both modes per
+`tests/wycheproof_decisions.md`; keeping them out of this list means a
+future Wycheproof vector that wrongly verifies under ZIP-215 on those
+flags fails CI instead of being silently demoted to `zip215Divergence`. -/
 private def zip215PermissibleFlags : List String :=
-  ["InvalidEncoding", "InvalidKtv", "InvalidSignature"]
+  ["InvalidEncoding"]
 
 private def overlap (a b : List String) : Bool :=
   a.any (fun x => b.contains x)

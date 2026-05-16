@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install elan
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache .lake
+        uses: actions/cache@v4
+        with:
+          path: .lake
+          key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'lake-manifest.json') }}
+          restore-keys: |
+            lake-${{ runner.os }}-
+
+      - name: Forbidden tokens (no sorry / partial / unsafe / extern)
+        run: |
+          set -e
+          ! grep -RInE '^\s*(sorry|partial def|unsafe def|@\[extern[^]]*\])\b' \
+              --include='*.lean' \
+              LeanCrypto Tests
+          echo "OK no forbidden tokens"
+
+      - name: Build
+        run: lake build
+
+      - name: Run all test executables
+        run: |
+          set -e
+          shopt -s nullglob
+          fail=0
+          for exe in .lake/build/bin/*; do
+            [ -x "$exe" ] && [ -f "$exe" ] || continue
+            # Skip the request/response CLI — driven by the diff step below.
+            case "$(basename "$exe")" in
+              Tests-DiffCli) continue;;
+            esac
+            echo "::group::$(basename "$exe")"
+            if ! "$exe"; then
+              echo "::error::$(basename "$exe") exited non-zero"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$fail"
+
+      - name: Differential fuzz (Lean vs Python hashlib + Node ed25519)
+        run: |
+          ./tests/diff/run.sh

@@ -1,0 +1,107 @@
+import LeanCrypto.Bytes
+
+/-!
+# `LeanCrypto.Data.CAVS`
+
+Tiny line-based parser for NIST CAVP `.rsp` files used to validate hash
+implementations. Format example:
+
+```
+#  CAVS 11.0
+#  "SHA-256 ShortMsg" information
+
+[L = 32]
+
+Len = 0
+Msg = 00
+MD = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+Len = 8
+Msg = d3
+MD = 28969cdfa74a12c82f3bad960b0b000aca2ac329deea5c2328ebc6f2ba9802c1
+```
+
+`Len` is the message length in **bits**. When `Len = 0` the `Msg` field is
+`00` by convention but the actual input is empty. Comments (`#`) and
+section headers (`[…]`) are skipped.
+-/
+
+set_option autoImplicit false
+
+namespace LeanCrypto.Data.CAVS
+
+open LeanCrypto.Bytes
+
+structure MsgRecord where
+  /-- Length of the message in **bits** (so a 1-byte message has `lenBits = 8`). -/
+  lenBits : Nat
+  msg     : ByteArray
+  md      : ByteArray
+  deriving Inhabited
+
+structure MonteRecord where
+  /-- The seed for a Monte Carlo run. -/
+  seed : ByteArray
+  /-- 100 expected output digests, in order. -/
+  mds  : Array ByteArray
+  deriving Inhabited
+
+private def stripComments (line : String) : String :=
+  let line := line.trimAscii.toString
+  if line.isEmpty || line.startsWith "#" || line.startsWith "[" then "" else line
+
+/-- Parse a `*ShortMsg.rsp` / `*LongMsg.rsp` file body. -/
+def parseMsgFile (text : String) : Except String (Array MsgRecord) := do
+  let mut records : Array MsgRecord := #[]
+  let mut len  : Option Nat       := none
+  let mut msgH : Option String    := none
+  for raw in text.splitOn "\n" do
+    let line := stripComments raw
+    if line.isEmpty then continue
+    let parts := line.splitOn "="
+    match parts with
+    | [k, v] =>
+        let k := k.trimAscii.toString
+        let v := v.trimAscii.toString
+        if k == "Len" then
+          len  := some v.toNat!
+          msgH := none
+        else if k == "Msg" then
+          msgH := some v
+        else if k == "MD" then
+          let some lenN := len     | throw s!"MD without Len: {line}"
+          let some msgX := msgH    | throw s!"MD without Msg: {line}"
+          let msgBytes :=
+            if lenN == 0 then ByteArray.empty
+            else (hexToBytes msgX).getD ByteArray.empty
+          let some mdBytes := hexToBytes v | throw s!"bad MD hex: {v}"
+          records := records.push { lenBits := lenN, msg := msgBytes, md := mdBytes }
+          len  := none
+          msgH := none
+    | _ => continue
+  return records
+
+/-- Parse a `*Monte.rsp` file body. -/
+def parseMonteFile (text : String) : Except String MonteRecord := do
+  let mut seed : Option ByteArray := none
+  let mut mds  : Array ByteArray := #[]
+  for raw in text.splitOn "\n" do
+    let line := stripComments raw
+    if line.isEmpty then continue
+    let parts := line.splitOn "="
+    match parts with
+    | [k, v] =>
+        let k := k.trimAscii.toString
+        let v := v.trimAscii.toString
+        if k == "Seed" then
+          let some s := hexToBytes v | throw s!"bad Seed hex: {v}"
+          seed := some s
+        else if k == "MD" then
+          let some s := hexToBytes v | throw s!"bad MD hex: {v}"
+          mds := mds.push s
+        -- ignore "COUNT = N" lines
+    | _ => continue
+  let some s := seed | throw "Monte file missing Seed"
+  return { seed := s, mds := mds }
+
+end LeanCrypto.Data.CAVS

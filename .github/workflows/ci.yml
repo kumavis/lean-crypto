@@ -33,13 +33,21 @@ jobs:
           set -e
           ! grep -RInE '^\s*(sorry|partial def|unsafe def|@\[extern[^]]*\])\b' \
               --include='*.lean' \
-              LeanCrypto Tests
+              LeanCrypto LeanCryptoVCVio Tests
           echo "OK no forbidden tokens"
 
-      - name: Build
-        run: lake build
+      - name: Core LeanCrypto stays Mathlib/VCVio-free
+        run: |
+          set -e
+          ! grep -RInE '^\s*import\s+(Mathlib|VCVio)\b' \
+              --include='*.lean' \
+              LeanCrypto LeanCrypto.lean
+          echo "OK no Mathlib/VCVio imports in core"
 
-      - name: Run all test executables
+      - name: Build core
+        run: lake build LeanCrypto $(grep -oE 'lean_exe\s+\S+' lakefile.lean | awk '{print $2}' | grep -v '^Tests\.VCVio')
+
+      - name: Run core test executables
         run: |
           set -e
           shopt -s nullglob
@@ -47,8 +55,10 @@ jobs:
           for exe in .lake/build/bin/*; do
             [ -x "$exe" ] && [ -f "$exe" ] || continue
             # Skip the request/response CLI — driven by the diff step below.
+            # Skip Tests-VCVio-* — exercised in the vcvio-build job.
             case "$(basename "$exe")" in
               Tests-DiffCli) continue;;
+              Tests-VCVio-*) continue;;
             esac
             echo "::group::$(basename "$exe")"
             if ! "$exe"; then
@@ -62,3 +72,64 @@ jobs:
       - name: Differential fuzz (Lean vs Python hashlib + Node ed25519)
         run: |
           ./tests/diff/run.sh
+
+  vcvio-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install elan
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache .lake (vcvio variant — keyed independently from core)
+        uses: actions/cache@v4
+        with:
+          path: .lake
+          key: lake-vcvio-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'lake-manifest.json') }}
+          restore-keys: |
+            lake-vcvio-${{ runner.os }}-
+
+      - name: Fetch VCV-io submodules (ML-KEM / ML-DSA / Falcon native C)
+        run: |
+          set -e
+          if [ -d .lake/packages/VCVio ]; then
+            git -C .lake/packages/VCVio submodule update --init --depth 1
+          else
+            echo "VCVio package not yet fetched; lake update will handle it"
+          fi
+
+      - name: Fetch dependencies (lake update writes lake-manifest.json)
+        run: lake update
+
+      - name: Fetch Mathlib precompiled olean cache
+        run: lake exe cache get
+
+      - name: Fetch VCV-io submodules (post-update)
+        run: git -C .lake/packages/VCVio submodule update --init --depth 1
+
+      - name: Build LeanCryptoVCVio + Tests.VCVio.*
+        run: |
+          set -e
+          lake build LeanCryptoVCVio
+          for tgt in $(grep -oE 'lean_exe\s+Tests\.VCVio\.\S+' lakefile.lean | awk '{print $2}'); do
+            lake build "$tgt"
+          done
+
+      - name: Run Tests-VCVio-* executables
+        run: |
+          set -e
+          shopt -s nullglob
+          fail=0
+          for exe in .lake/build/bin/Tests-VCVio-*; do
+            [ -x "$exe" ] && [ -f "$exe" ] || continue
+            echo "::group::$(basename "$exe")"
+            if ! "$exe"; then
+              echo "::error::$(basename "$exe") exited non-zero"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$fail"

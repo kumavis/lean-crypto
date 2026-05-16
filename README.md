@@ -6,12 +6,16 @@ and [`noble-ed25519`](https://github.com/paulmillr/noble-ed25519) references
 and the standard test suites — FIPS 180-4 / NIST CAVP, RFC 8032 §7.1,
 and Project Wycheproof (`testvectors_v1/ed25519_test.json`).
 
-* **Status:** v1 complete (all 11 milestones, ROADMAP).
-* **Toolchain:** pinned to `leanprover/lean4:v4.27.0`.
-* **Dependencies:** none beyond the Lean toolchain — no Mathlib, no std4/batteries, no FFI.
+* **Status:** v1 complete (M1–M11). Optional VCV-io wrapper layered on top (M12–M18).
+* **Toolchain:** pinned to `leanprover/lean4:v4.29.0`.
+* **Core dependencies:** none — no Mathlib, no std4/batteries, no FFI.
+* **Wrapper dependencies (opt-in):** Mathlib 4.29.0 + VCV-io 4.29.0, used only
+  by the separate `LeanCryptoVCVio` library.
 
 See [`docs/PLAN.md`](docs/PLAN.md) and [`docs/ROADMAP.md`](docs/ROADMAP.md)
-for the design.
+for the core design, and
+[`docs/VCV_IO_PLAN.md`](docs/VCV_IO_PLAN.md) /
+[`docs/VCV_IO_ROADMAP.md`](docs/VCV_IO_ROADMAP.md) for the VCV-io wrapper.
 
 ## What's in the box
 
@@ -115,3 +119,58 @@ does not currently expose; see `docs/PLAN.md` §8 for the follow-on plan.
 
 All vectors are committed in-repo. Refresh procedure for the Wycheproof
 snapshot is documented in `tests/vectors/wycheproof/SOURCE.md`.
+
+## VCV-io integration (optional)
+
+A separate `LeanCryptoVCVio` library lifts the SHA-256/SHA-512/Ed25519
+primitives into [VCV-io](https://github.com/dtumad/VCV-io)'s `OracleComp`
+framework so they plug into game-based crypto proofs. The core
+`LeanCrypto` library stays Mathlib-free; the wrapper takes Mathlib +
+VCV-io as dependencies only inside its own `lean_lib` target.
+
+```lean
+import LeanCryptoVCVio
+
+open LeanCryptoVCVio
+
+-- Deterministic adapter (M14): pure SHA-512 lifted into OracleComp.
+example (msg : ByteArray) :
+    OracleComp ([]ₒ) ByteArray :=
+  sha512OC msg
+
+-- SignatureAlg instance for Ed25519 (M15): keygen samples 32 random
+-- bytes via unifSpec; sign/verify route through LeanCrypto's pure ops.
+#check (ed25519 : SignatureAlg ProbComp ByteArray ByteArray ByteArray ByteArray)
+
+-- SHA-512 modeled as a random oracle (M16): every internal sha512 call
+-- becomes a `query (spec := sha512ROSpec) bs`.
+#check (signROM : ByteArray → ByteArray → OracleComp sha512ROSpec ByteArray)
+
+-- UF-CMA shape wiring (M17): trivialAdv plugs into VCV-io's
+-- unforgeableAdv / unforgeableExp without any proof work.
+#check (trivialAdv : SignatureAlg.unforgeableAdv ed25519)
+```
+
+What the wrapper does *not* ship:
+
+* No security proofs (no `PerfectlyComplete`, no `UF-CMA` reduction).
+  Both depend on a proof of `verify (derivePublicKey sk) (sign sk msg) msg = true` —
+  the algebraic-correctness theorem of the scheme itself — which is
+  multi-day Mathlib-level work deliberately deferred.
+* No `lean_exe` driven game evaluation. `unforgeableExp` lives at the
+  `SPMF Bool` level via the noncomputable `ProbCompRuntime.probComp`;
+  the runtime smoke test (`Tests/VCVio/GameSmoke.lean`) drives a
+  hand-built parallel game body through `simulateQ` instead.
+
+CI runs the wrapper build + tests in a separate `vcvio-build` job that
+restores Mathlib's precompiled olean cache via `lake exe cache get`.
+
+```sh
+# Build the wrapper and its tests locally (downloads Mathlib + VCV-io
+# on first run; subsequent builds use cached oleans):
+lake update
+git -C .lake/packages/VCVio submodule update --init --depth 1
+lake exe cache get
+lake build LeanCryptoVCVio
+for exe in .lake/build/bin/Tests-VCVio-*; do "$exe"; done
+```

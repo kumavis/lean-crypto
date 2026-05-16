@@ -17,6 +17,9 @@ lean_lib LeanCrypto where
 lean_lib LeanCryptoVCVio where
   buildType := BuildType.release
 
+lean_lib LeanCryptoProofs where
+  buildType := BuildType.release
+
 lean_exe Tests.HelloTest
 
 lean_exe Tests.BytesTest

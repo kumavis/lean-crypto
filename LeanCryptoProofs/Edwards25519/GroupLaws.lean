@@ -149,5 +149,42 @@ lemma add_negate_cancel_crossEq (q : EdPoint) (hq : OnCurve q) :
     linear_combination
       ((4 : ZMod p) * ((q.Z : ZMod p)^2 - (d : ZMod p) * (q.T : ZMod p)^2)) * hq'
 
+/-! ## `add_assoc_crossEq` — probed in M24-spike, not closed
+
+The natural next lemma after the identity / inverse cases is
+associativity:
+
+  `add (add p₁ p₂) p₃ ≡_cross add p₁ (add p₂ p₃)`,
+  given `OnCurve p₁`, `OnCurve p₂`, `OnCurve p₃`.
+
+This is a polynomial identity in 12 variables conditioned by three
+curve equations. We probed it with the same `simp + push_cast +
+grobner` pipeline that just closed `add_negate_cancel_crossEq`.
+
+**Result:** `grobner` hits Lean's E-matching round limit + `maxRecDepth`
+before completing. The diagnostic output shows it correctly identified
+all three curve equations as facts and put them in their own equivalence
+classes, but couldn't synthesise a Gröbner-style witness within the
+default heuristic budget. Increasing `maxRecDepth` and `maxHeartbeats`
+to 1,000,000 was not sufficient; the search space is plausibly
+non-polynomial in the formula size, not polynomial.
+
+Closing this lemma would require either:
+
+* manually computing a linear-combination witness across the three
+  hypotheses (the Fiat-Crypto `nsatz` / Hales–Raya elementary-division
+  precedents both effectively do this), or
+* a substantially more capable Gröbner basis backend than Lean's
+  current `grind`-based heuristics provide.
+
+Per the M21 external survey, every project at HACL\*/s2n-bignum/EasyCrypt
+scale axiomatises the group structure here and proves only the layer
+above it. We follow suit: `add_assoc_crossEq` is deferred indefinitely.
+The verify_sign_self universal proof (which depends transitively on
+this) remains stated as a future-work target; M20's per-RFC-vector
+`native_decide` theorems and the wrapper-level
+`ed25519_completes_on_rfc_vectors` are the canonical completeness
+statements for `ed25519` today. -/
+
 end EdPoint
 end LeanCrypto.Curve.Edwards25519

@@ -57,7 +57,7 @@ private def clampScalar (h32 : ByteArray) : Nat := Id.run do
 /-- Projective equality: `(X₁:Y₁:Z₁) = (X₂:Y₂:Z₂)` iff `X₁·Z₂ = X₂·Z₁` and
 `Y₁·Z₂ = Y₂·Z₁`. Avoids a `Z`-inversion per comparison. -/
 private def projEq (p q : EdPoint) : Bool :=
-  decide (mul p.X q.Z = mul q.X p.Z) ∧ decide (mul p.Y q.Z = mul q.Y p.Z)
+  decide (mul p.X q.Z = mul q.X p.Z) && decide (mul p.Y q.Z = mul q.Y p.Z)
 
 /-! ## Sign / public-key derivation -/
 

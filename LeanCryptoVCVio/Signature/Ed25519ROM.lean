@@ -43,7 +43,7 @@ private def clampScalar (h32 : ByteArray) : Nat := Id.run do
 /-- Local copy of `projEq` from the core Ed25519 module. -/
 private def projEq (a b : EdPoint) : Bool :=
   decide (LeanCrypto.Field.Fp25519.mul a.X b.Z =
-          LeanCrypto.Field.Fp25519.mul b.X a.Z) ∧
+          LeanCrypto.Field.Fp25519.mul b.X a.Z) &&
   decide (LeanCrypto.Field.Fp25519.mul a.Y b.Z =
           LeanCrypto.Field.Fp25519.mul b.Y a.Z)
 

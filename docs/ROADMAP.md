@@ -1,5 +1,9 @@
 # `lean-crypto` — Roadmap
 
+> **All v1 milestones (M1–M11) shipped.** Follow-on work lives in
+> `docs/VCV_IO_ROADMAP.md` (M12–M18, VCV-io wrapper) and
+> `docs/PROOFS_ROADMAP.md` (M19–M24, algebraic foundations).
+
 Sequenced milestones from empty repo to SHA-256 + Ed25519 passing every
 in-scope vector. Each milestone produces a runnable artifact with passing
 tests before the next starts. Each milestone is a single PR.

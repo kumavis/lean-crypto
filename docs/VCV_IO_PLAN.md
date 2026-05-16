@@ -15,6 +15,16 @@ This plan covers two phases shipping together (separate PRs):
 Phase C (actual UF-CMA reductions) is **out of scope**. The surface we ship
 must not preclude it.
 
+> **Status (post-M18):** Phase A + B's modeling layer are shipped. Both
+> `PerfectlyComplete` promises (§5.1, §6) were deferred — they required a
+> `verify_sign_self` theorem that turned out to be person-months of
+> algebraic-correctness proof. See `docs/PROOFS_ROADMAP.md` for what was
+> shipped instead (per-vector `native_decide` theorems + the
+> `ed25519_completes_on_rfc_vectors` wrapper lemma) and where that path
+> bottoms out (M24: `add_assoc_crossEq` exceeds `grobner`'s current
+> heuristic budget). The wrapper-level VCV-io types and tests are all
+> green on CI.
+
 ---
 
 ## 1. Why this is feasible without touching core
@@ -68,18 +78,16 @@ land via lakefile edits + `lake update`.
 
 ---
 
-## 4. Toolchain bump (M12 precursor)
+## 4. Toolchain bump (M12 precursor) — *shipped*
 
-VCV-io's `v4.29.0` tag pins Lean 4.29.0 + Mathlib 4.29.0; we're on 4.27.0.
-The bump is a **standalone PR** before the wrapper work starts.
+VCV-io's `v4.29.0` tag pins Lean 4.29.0 + Mathlib 4.29.0; v1 of the
+library was on Lean 4.27.0. M12 bumped `lean-toolchain` to
+`leanprover/lean4:v4.29.0` (originally planned at 4.28.0; revised mid-
+flight to match VCV-io's tag).
 
-- Update `lean-toolchain` to `leanprover/lean4:v4.29.0`.
-- Run `lake build` on everything we have today; fix any breaks (likely
-  small — `Array.modify` or `String.trim`-style API tweaks).
-- Re-run NIST CAVP, RFC 8032, Wycheproof, and the differential fuzz harness.
-
-Keeping it standalone means the existing test surface stays green on 4.28
-before we add a Mathlib dep on top.
+The bump landed as a **standalone PR** before the wrapper work — zero
+code changes were needed beyond the toolchain pin. Every existing test
+exe and the differential fuzz harness stayed green on 4.29.0.
 
 ---
 
@@ -121,7 +129,7 @@ end LeanCryptoVCVio
 `LeanCryptoVCVio.Prelude`. It's the wrapper's only piece of real monadic
 plumbing.
 
-### 5.1 `PerfectlyComplete` and the core lemma we need
+### 5.1 `PerfectlyComplete` — what we shipped vs. what we planned
 
 VCV-io's `PerfectlyComplete sigAlg` asserts:
 
@@ -135,60 +143,90 @@ For our `ed25519` this reduces (by `pure_bind` / `simulateQ`-irrelevance) to:
 ∀ sk msg, LeanCrypto.verify (derivePublicKey sk) (LeanCrypto.sign sk msg) msg = true
 ```
 
-We have this **as a test** (every RFC + Wycheproof vector exercises it), but
-not as a `theorem` in core. Phase B asks core to grow exactly one lemma:
+Phase B asked core to grow exactly one lemma:
 
 ```lean
 theorem Ed25519.verify_sign_self (sk msg : ByteArray) (hsk : sk.size = 32) :
     verify (derivePublicKey sk) (sign sk msg) msg = true
 ```
 
-This is the **single load-bearing ask** of the wrapper on core. If the proof
-turns out hard, Phase B falls back to per-vector `Decidable.decide` blocks
-rather than universal completeness — flagged in M15 below.
+**That lemma was *not* shipped** — the fallback flagged in this section
+(per-vector decide) is what landed. The post-mortem in
+`docs/PROOFS_ROADMAP.md` documents the M20–M24 sequence that:
+
+1. Proved `verify_sign_self_rfc_{1,2,3}` for the RFC 8032 §7.1 vectors
+   via `native_decide` (with the documented `ofReduceBool` axiom cost).
+2. Wrapped them into `ed25519_completes_on_rfc_vectors` at the
+   `SignatureAlg`-pipeline level (`docs/PROOFS_ROADMAP.md` M20).
+3. Laid in algebraic foundations on `EdPoint` (`ProjEq` Setoid, cast
+   lemmas, group laws on `add` except associativity).
+4. Probed associativity (M24 spike); it exceeds Lean's current
+   `grobner` heuristic budget. Deferred indefinitely.
+
+Net for the wrapper: the universal `PerfectlyComplete ed25519` is
+*not* an instance in `LeanCryptoVCVio/`. The genuine completeness
+statement available to downstream proofs is
+`LeanCryptoVCVio.Ed25519Proofs.ed25519_completes_on_rfc_vectors`,
+quantified over the RFC test corpus.
 
 ---
 
-## 6. SHA-512 as a RandomOracle
+## 6. SHA-512 as a RandomOracle — *partially shipped*
 
 VCV-io's `VCVio/OracleComp/QueryTracking/RandomOracle.lean` defines a
 caching/lazy random oracle. For Ed25519ROM we replace every internal
-`sha512 x` call with `query () x` against an oracle of spec
+`sha512 x` call with `query bs` against an oracle of spec
 `ByteArray →ₒ ByteArray`.
 
 ```lean
-def sha512ROSpec : OracleSpec Unit := fun _ => ByteArray  -- (ByteArray →ₒ ByteArray)
+-- Final shape (note the spec is indexed by ByteArray, not Unit):
+def sha512ROSpec : OracleSpec ByteArray := fun _ => ByteArray
 
-def ed25519ROM :
-    SignatureAlg (OracleComp sha512ROSpec) ByteArray ByteArray ByteArray ByteArray where
-  keygen := do
-    let sk ← drawBytes 32
-    let h ← query (spec := sha512ROSpec) () sk
-    -- … same RFC 8032 shape, but each sha512 call → query
+def signROM (sk msg : ByteArray) : OracleComp sha512ROSpec ByteArray := do
+  let h ← query (spec := sha512ROSpec) sk
+  let s := clampScalar (h.extract 0 32)
+  -- … same RFC 8032 shape, but each sha512 call → query bs
 ```
 
-The ROM variant is the **shape** that UF-CMA proofs would target. Phase B
-ships the modeling, not the proof.
+**Scope deviation in M16:** the originally-planned `ed25519ROM :
+SignatureAlg (OracleComp sha512ROSpec) …` instance was *not* shipped.
+A SignatureAlg that includes keygen randomness needs a combined
+`unifSpec + sha512ROSpec` spec, which is more plumbing than M16's
+scope. What landed instead are the building blocks
+(`derivePublicKeyROM`, `signROM`, `verifyROM`) typed in
+`OracleComp sha512ROSpec`, plus a test that runs them under
+`sha512Impl : QueryImpl sha512ROSpec Id` (instantiating the oracle
+with the real SHA-512) and confirms byte-equality with the RFC vectors.
+
+The ROM variant remains the **shape** that UF-CMA proofs would target.
+Phase B shipped the modeling, not the proof — same fate as Phase A's
+PerfectlyComplete.
 
 ---
 
-## 7. Tests / acceptance
+## 7. Tests / acceptance — *what shipped*
 
 ### Phase A (M14)
-- `Tests/VCVio/Hash`: For 20 random messages, `simulateQ idQueryImpl (sha256OC msg)`
-  byte-equals `LeanCrypto.sha256 msg`. Same for SHA-512.
+- `Tests/VCVio/Hash`: 17 message lengths × 2 algos = 34 cases asserting
+  `simulateQ emptyImpl (shaXOC m) |>.run = shaX m`. ✓
 
 ### Phase B (M15–M17)
-- `Tests/VCVio/Ed25519Det`: RFC 8032 §7.1 vector 1 round-trips through the
-  `SignatureAlg` instance: seed `keygen`'s `unifSpec` via a fixed-bit
-  `QueryImpl`, then `sign` and `verify` match RFC bytes.
-- `Tests/VCVio/Ed25519ROM`: `PerfectlyComplete ed25519ROM` typechecks; one
-  keygen→sign→verify smoke trip through `simulateQ`.
-- `Tests/VCVio/GameSmoke`: `unforgeableExp ed25519 trivialAdv` evaluates to
-  `false` (trivial adversary returns `(msg, garbage_sig)`).
+- `Tests/VCVio/Ed25519Det`: 3 RFC 8032 §7.1 vectors × 3 ops
+  (`ed25519.sign` + strict / ZIP-215 verify) = 9 byte-exact checks via
+  `simulateQ` with `constUnifImpl`. ✓
+- `Tests/VCVio/Ed25519ROM`: 3 RFC vectors × 3 ops (`derivePublicKeyROM`,
+  `signROM`, `verifyROM`) = 9 checks via `simulateQ` with `sha512Impl`
+  wired to the real SHA-512. The `PerfectlyComplete ed25519ROM`
+  typecheck **was not shipped** — same deferral as Phase A. ✓ (runtime
+  checks only)
+- `Tests/VCVio/GameSmoke`: `smokeGame` (the inner experiment body of
+  `unforgeableExp ed25519 trivialAdv`, lifted to `ProbComp Bool` since
+  `unforgeableExp` returns `noncomputable SPMF Bool`) evaluates to
+  `false` under `simulateQ` with `constUnifImpl`. ✓
 
 Same guardrail as core: no `sorry`, `partial`, `unsafe`, or `extern`. CI
-forbidden-tokens grep applies to `LeanCryptoVCVio/` and `Tests/VCVio/`.
+forbidden-tokens grep applies to `LeanCryptoVCVio/`,
+`LeanCryptoProofs/`, and `Tests/VCVio/`.
 
 ---
 
@@ -221,18 +259,21 @@ of every push.
 
 ---
 
-## 9. Risks
+## 9. Risks — post-mortem
 
-- **VCV-io API churn.** Tag-per-toolchain (e.g. `v4.29.0`) gives a stable
-  pin per Mathlib version; bumps happen alongside our own toolchain bumps.
-  If breaking changes between tags become frequent, vendor a snapshot.
-- **`PerfectlyComplete` proof of `verify_sign_self`.** Proving universal
-  completeness of our own Ed25519 implementation may be harder than expected.
-  Fallback: per-vector `Decidable.decide` blocks. Flagged in M15.
-- **Mathlib in CI.** Slow even with cache. `lake exe cache get` is the
-  primary mitigation. Fallback: nightly-only.
-- **4.27 → 4.28 toolchain bump.** Low probability of large breakage in our
-  small surface, but treat M12 as standalone so it doesn't ambush wrapper work.
+- **VCV-io API churn.** Mitigated: `v4.29.0` tag pin held throughout
+  M13–M18. No bumps were needed.
+- **`PerfectlyComplete` proof of `verify_sign_self`.** Materialised
+  exactly as flagged. The "may be harder than expected" was right; the
+  external survey (`docs/PROOFS_ROADMAP.md` M21) estimated 4–8
+  person-months. We took the documented fallback: per-RFC-vector
+  `native_decide` theorems land an honest weakened completeness
+  statement; universal proof deferred indefinitely.
+- **Mathlib in CI.** `lake exe cache get` worked fine. The `build` job
+  initially failed for a *different* reason — missing explicit
+  `lake update` after M13 added the Mathlib + VCV-io `require`s —
+  fixed in a follow-up commit. Cold CI time: ~12 min for `vcvio-build`.
+- **4.27 → 4.29 toolchain bump.** No code changes needed.
 
 ---
 

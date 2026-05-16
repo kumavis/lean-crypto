@@ -153,14 +153,56 @@ example (msg : ByteArray) :
 
 What the wrapper does *not* ship:
 
-* No security proofs (no `PerfectlyComplete`, no `UF-CMA` reduction).
-  Both depend on a proof of `verify (derivePublicKey sk) (sign sk msg) msg = true` —
-  the algebraic-correctness theorem of the scheme itself — which is
-  multi-day Mathlib-level work deliberately deferred.
+* No `UF-CMA` reduction. `unforgeableExp` is wired (M17) but no
+  security theorem is stated against it.
+* No `PerfectlyComplete` instance on `ed25519` or `ed25519ROM`. The
+  proof depended on a universal
+  `verify (derivePublicKey sk) (sign sk msg) msg = true` theorem — the
+  algebraic-correctness theorem of the scheme itself, multi-month
+  Mathlib-level work per the external survey, deferred indefinitely.
+  See `docs/PROOFS_ROADMAP.md` for what *was* proven (per-RFC-vector
+  `native_decide` theorems + foundations on the Edwards group law).
 * No `lean_exe` driven game evaluation. `unforgeableExp` lives at the
   `SPMF Bool` level via the noncomputable `ProbCompRuntime.probComp`;
   the runtime smoke test (`Tests/VCVio/GameSmoke.lean`) drives a
   hand-built parallel game body through `simulateQ` instead.
+
+## Proof track (`LeanCryptoProofs/`)
+
+A third `lean_lib LeanCryptoProofs` carries the algebraic foundations
+work (also depends on Mathlib; also opt-in). Highlights from M19–M24:
+
+```lean
+import LeanCryptoProofs
+
+open LeanCrypto.Signature.Ed25519.Proofs
+
+-- Genuine compile-time theorem (not a runtime check): RFC 8032 §7.1
+-- vector 1's freshly-signed signature verifies under the strict
+-- RFC 8032 verifier.
+#check (verify_sign_self_rfc_1 :
+    verify (derivePublicKey sk_1) (sign sk_1 msg_1) msg_1 = true)
+
+-- Wrapper-level bundle: the SignatureAlg sign-then-verify pipeline
+-- reduces to `pure true` on each (sk, msg) in `rfcVectors`.
+open LeanCryptoVCVio.Ed25519Proofs in
+#check ed25519_completes_on_rfc_vectors
+```
+
+Each `verify_sign_self_rfc_*` theorem is closed by `native_decide`,
+which compiles the decidability check to native code and asserts the
+result as a fresh per-theorem axiom (`_native_decide.ax_N`). The
+trust base is `propext + Classical.choice + Quot.sound` plus three
+`ofReduceBool`-derived axioms, audited in source via `#print axioms`.
+Mathlib forbids `native_decide` via its style linter; we're outside
+Mathlib so this is a documented trade-off, isolated to one module.
+
+Also landed: `ProjEq` Setoid on `EdPoint`, `Fp25519 ↔ ZMod p` cast
+lemmas, `add_comm` / `add_zero_*` / `add_negate_cancel` via `ring` /
+`linear_combination`. `add_assoc` was probed and exceeds Lean's
+current `grobner` heuristic budget — see `docs/PROOFS_ROADMAP.md` M24
+for the post-mortem and the three possible paths if anyone ever
+comes back to it.
 
 CI runs the wrapper build + tests in a separate `vcvio-build` job that
 restores Mathlib's precompiled olean cache via `lake exe cache get`.

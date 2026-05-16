@@ -10,8 +10,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
-SHA_N="${1:-8}"
-ED_N="${2:-30}"
+SHA_N="${1:-16}"
+ED_N="${2:-50}"
 SEED="${3:-0}"
 
 echo ":: building DiffCli"

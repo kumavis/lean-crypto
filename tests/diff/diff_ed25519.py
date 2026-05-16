@@ -8,7 +8,8 @@ byte-equality on every case is the goal.
 
 Run:
   python3 tests/diff/diff_ed25519.py [N] [SEED]
-    N    – number of (sk, msg) pairs (default 30)
+    N    – number of *random* (sk, msg) pairs (default 50). Adds a
+           fixed list of boundary-case pairs on top.
     SEED – PRNG seed (default 0)
 
 We exercise five properties per (sk, msg) pair:
@@ -17,7 +18,12 @@ We exercise five properties per (sk, msg) pair:
   3. Lean.verify(Lean.pk, Lean.sig, msg)               == true
   4. Node.verify(Lean.pk, Lean.sig, msg)               == true     (cross-verify)
   5. Lean.verify(Node.pk, Node.sig, msg)               == true     (cross-verify)
-  6. Tamper one bit of sig → both Lean.verify and Node.verify reject
+  6. Tamper one bit of sig (varying bit position) → both verifiers reject
+
+Plus a fixed boundary-case sweep that targets known-tricky inputs
+(all-zero sk, all-ones sk, low-entropy msgs, msgs at SHA-512 block
+boundaries, etc.). These often exercise small-order clamps, the
+internal SHA-512 padding edge cases, and zero-length-message paths.
 """
 
 from __future__ import annotations
@@ -46,10 +52,35 @@ def run_cli(cmd: list[str], stdin_text: str) -> list[str]:
     return proc.stdout.splitlines()
 
 
-def flip_bit0(hex_sig: str) -> str:
+def flip_bit(hex_sig: str, bit_position: int) -> str:
+    """Flip a single bit of `hex_sig`. `bit_position` is 0-indexed over
+    the full 512-bit signature (so bit 0 ↦ byte 0 lowest bit, bit 511 ↦
+    byte 63 highest bit)."""
     sig = bytearray.fromhex(hex_sig)
-    sig[0] ^= 0x01
+    byte_idx = bit_position // 8
+    bit_idx = bit_position % 8
+    sig[byte_idx] ^= (1 << bit_idx)
     return sig.hex()
+
+
+# Fixed boundary-case (sk, msg) pairs. These target specific classes of
+# bug we'd rather catch with fixed inputs than discover via random
+# search: clamp behaviour, SHA-512 padding at block boundaries, zero-
+# entropy inputs.
+BOUNDARY_PAIRS: list[tuple[bytes, bytes]] = [
+    (bytes(32), b""),                              # all-zero sk, empty msg
+    (bytes(32), b"\x00"),                          # all-zero sk, single null byte
+    (b"\xff" * 32, b""),                           # all-ones sk
+    (b"\x01" + bytes(31), b"\x42"),                # minimal-entropy sk
+    (bytes(31) + b"\x01", b"abc"),                 # nonzero only at MSB
+    (bytes(range(32)), bytes(range(64))),          # patterned sk + 64-byte msg (SHA-256 block boundary)
+    (bytes(range(32)), bytes(range(128))),         # 128-byte msg (SHA-512 block boundary)
+    (bytes(range(32)), bytes(range(127))),         # 127-byte msg (one short of SHA-512 block)
+    (bytes(range(32)), bytes(range(129))),         # 129-byte msg (one over SHA-512 block)
+    (bytes(range(32)), bytes(112)),                # 112-byte all-zero msg (SHA-512 padding inflection)
+    (bytes(range(32)), bytes(111)),                # 111-byte all-zero msg
+    (bytes(range(32)), bytes(113)),                # 113-byte all-zero msg
+]
 
 
 def main() -> int:
@@ -58,16 +89,20 @@ def main() -> int:
     if not NODE_SCRIPT.exists():
         raise SystemExit(f"missing {NODE_SCRIPT}")
 
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else 30
+    n = int(sys.argv[1]) if len(sys.argv) > 1 else 50
     seed = int(sys.argv[2]) if len(sys.argv) > 2 else 0
     rng = random.Random(seed)
 
-    # Generate (sk, msg) pairs.
-    pairs: list[tuple[bytes, bytes]] = []
+    # Generate random (sk, msg) pairs, then prepend the boundary list.
+    pairs: list[tuple[bytes, bytes]] = list(BOUNDARY_PAIRS)
     for _ in range(n):
         sk = rng.randbytes(32)
         msg = rng.randbytes(rng.choice(LENGTHS))
         pairs.append((sk, msg))
+
+    # Per-pair tamper bit chosen pseudorandomly so we exercise multiple
+    # bit positions across the test set rather than always flipping bit 0.
+    tamper_bits: list[int] = [rng.randrange(0, 512) for _ in pairs]
 
     # Phase 1: derive + sign on both sides.
     lean_cmds, node_cmds = [], []
@@ -100,15 +135,15 @@ def main() -> int:
 
     # Phase 2: cross-verify under both verifiers.
     lean_verify_cmds, node_verify_cmds = [], []
-    for (sk, msg), (lpk, lsig, npk, nsig) in zip(pairs, derived):
+    for (sk, msg), (lpk, lsig, npk, nsig), tbit in zip(pairs, derived, tamper_bits):
         # 3. Lean verifies its own
         lean_verify_cmds.append(f"ed25519-verify {lpk} {lsig} {msg.hex()}")
         # 4. Node verifies Lean's sig
         node_verify_cmds.append(f"ed25519-verify {lpk} {lsig} {msg.hex()}")
         # 5. Lean verifies Node's sig
         lean_verify_cmds.append(f"ed25519-verify {npk} {nsig} {msg.hex()}")
-        # Tamper sig bit 0 — both verifiers should reject.
-        tampered = flip_bit0(lsig)
+        # Tamper one bit (varying position) — both verifiers should reject.
+        tampered = flip_bit(lsig, tbit)
         lean_verify_cmds.append(f"ed25519-verify {lpk} {tampered} {msg.hex()}")
         node_verify_cmds.append(f"ed25519-verify {lpk} {tampered} {msg.hex()}")
 
@@ -134,7 +169,7 @@ def main() -> int:
         if node_tamper_ko != "false":
             fails.append(f"pair#{i}: Node accepted tampered sig ({node_tamper_ko})")
 
-    total = n * 7  # 2 sign+derive checks + 5 verify checks per pair
+    total = len(pairs) * 7  # 2 sign+derive checks + 5 verify checks per pair
     if fails:
         print(f"FAIL {len(fails)} / {total} checks", file=sys.stderr)
         for line in fails[:10]:
@@ -143,7 +178,8 @@ def main() -> int:
             print(f"… and {len(fails) - 10} more", file=sys.stderr)
         return 1
 
-    print(f"OK {total} checks across {n} (sk, msg) pairs "
+    print(f"OK {total} checks across {len(pairs)} (sk, msg) pairs "
+          f"({len(BOUNDARY_PAIRS)} boundary + {n} random) "
           "(Lean ↔ Node ed25519, derive + sign + cross-verify + tamper)")
     return 0
 

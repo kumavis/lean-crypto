@@ -48,6 +48,19 @@ open LeanCrypto.Field.Fp25519 (Fp p)
     (Nat.le_of_lt (Nat.mod_lt b hp_pos)).trans (Nat.le_add_left p a)
   rw [Nat.cast_sub hbp, Nat.cast_add, ZMod.natCast_self, add_zero, ZMod.natCast_mod]
 
+/-- `Fp25519.neg` casts to negation in `ZMod p`. Needed because the curve
+operation `negate` and the negated-`T` branch of the addition formula
+introduce `Fp25519.neg`. -/
+@[simp] lemma castZMod_fp25519_neg (a : Fp) :
+    ((Fp25519.neg a : Nat) : ZMod p) = -((a : ZMod p)) := by
+  -- neg a := (p - a % p) % p
+  show (((p - a % p) % p : Nat) : ZMod p) = -((a : ZMod p))
+  rw [ZMod.natCast_mod]
+  have hp_pos : (0 : Nat) < p := by decide
+  have h1 : a % p ≤ p := (Nat.mod_lt _ hp_pos).le
+  rw [Nat.cast_sub h1, ZMod.natCast_self, ZMod.natCast_mod]
+  ring
+
 /-- Commutativity of `add` *modulo* `ProjEq`. With the 2008-HWCD-3
 formula this is in fact componentwise equality after casting to
 `ZMod p`, with `λ = 1`. -/

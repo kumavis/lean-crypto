@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 # Differential fuzz orchestrator.  Run from the repo root.
 #
-#   tests/diff/run.sh             # default counts
-#   tests/diff/run.sh 16 50       # 16 SHA samples per length, 50 Ed25519 pairs
+# Positional args (all optional; defaults shown):
+#   $1 SHA_N         (16)   sha256/sha512 one-shot samples per length class
+#   $2 ED_N          (50)   random Ed25519 (sk, msg) pairs
+#                            (in addition to the 12 fixed boundary cases)
+#   $3 SEED          (0)    PRNG seed for reproducibility
+#   $4 SHA_CHUNKS_N  (4)    sha256/sha512 streaming chunk-invariant samples
+#                            per length class (4 chunkings each)
+#
+# Examples:
+#   tests/diff/run.sh                # default counts
+#   tests/diff/run.sh 16 50          # bump SHA + Ed25519 counts
+#   tests/diff/run.sh 64 200 1 16    # heavier sweep with seed=1
 #
 # Exit 0 only if every cross-check passes.  Requires python3 + node on PATH.
 

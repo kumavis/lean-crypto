@@ -13,21 +13,21 @@ pure implementation. Any discrepancy aborts with a non-zero exit code. -/
 
 /-- Lengths covering both SHA-256 (64-byte block, length field at 56) and
 SHA-512 (128-byte block, length field at 112). -/
-def lengths : List Nat :=
+private def lengths : List Nat :=
   [0, 1, 7, 31, 32, 55, 56, 63, 64, 65, 111, 112, 127, 128, 129, 200, 1023]
 
 /-- Deterministic pattern fill, so the test is reproducible across runs. -/
-def patternBytes (n : Nat) : ByteArray :=
+private def patternBytes (n : Nat) : ByteArray :=
   let arr := Array.range n |>.map (fun i => UInt8.ofNat ((i * 17 + 13) % 256))
   ⟨arr⟩
 
-structure CaseResult where
+private structure CaseResult where
   algo : String
   len  : Nat
   ok   : Bool
   deriving Repr
 
-def runCase (algo : String) (msg : ByteArray)
+private def runCase (algo : String) (msg : ByteArray)
     (oc : ByteArray → OracleComp ([]ₒ) ByteArray) (pure_ : ByteArray → ByteArray) :
     CaseResult :=
   let got := simulateQ emptyImpl (oc msg) |>.run

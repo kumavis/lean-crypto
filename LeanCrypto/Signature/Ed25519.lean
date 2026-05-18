@@ -112,7 +112,7 @@ private def decodeForMode (mode : VerifyMode) (bs : ByteArray) : Option EdPoint 
 
 /-- Shared verify body. -/
 private def verifyWith (mode : VerifyMode) (pk sig msg : ByteArray) : Bool :=
-  if pk.size != 32 ∨ sig.size != 64 then false
+  if pk.size != 32 || sig.size != 64 then false
   else
     let encR := sig.extract 0 32
     let sBytes := sig.extract 32 64

@@ -159,7 +159,7 @@ jobs:
           # lake update has cloned VCVio into .lake/packages/VCVio; init its submodules.
           git -C .lake/packages/VCVio submodule update --init --depth 1
 
-      - name: Build LeanCryptoVCVio + Tests.VCVio.*
+      - name: Build LeanCryptoVCVio + LeanCryptoProofs + Tests.VCVio.*
         run: |
           set -ex
           if ! lake build LeanCryptoVCVio 2>&1 | tee /tmp/build-vcvio.log; then
@@ -167,6 +167,18 @@ jobs:
               echo "## lake build LeanCryptoVCVio failed (last 300 lines)"
               echo '```'
               tail -300 /tmp/build-vcvio.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          # Build the proofs library too — it depends on Mathlib so it belongs
+          # in this job, not the core build job. Without this, regressions in
+          # the linear_combination / native_decide proofs land silently.
+          if ! lake build LeanCryptoProofs 2>&1 | tee /tmp/build-proofs.log; then
+            {
+              echo "## lake build LeanCryptoProofs failed (last 300 lines)"
+              echo '```'
+              tail -300 /tmp/build-proofs.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1

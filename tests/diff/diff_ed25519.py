@@ -102,7 +102,11 @@ def main() -> int:
 
     # Per-pair tamper bit chosen pseudorandomly so we exercise multiple
     # bit positions across the test set rather than always flipping bit 0.
-    tamper_bits: list[int] = [rng.randrange(0, 512) for _ in pairs]
+    # We restrict to bits 0..503 (R + low 56 bytes of S) — flipping the
+    # high bits of byte 63 (bits 504..511) routinely pushes S over ℓ and
+    # the malleability gate (`S ≥ ℓ`) short-circuits the verify before
+    # the equation check runs, weakening what the tamper test exercises.
+    tamper_bits: list[int] = [rng.randrange(0, 504) for _ in pairs]
 
     # Phase 1: derive + sign on both sides.
     lean_cmds, node_cmds = [], []

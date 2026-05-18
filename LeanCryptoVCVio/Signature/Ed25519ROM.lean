@@ -79,7 +79,7 @@ def signROM (sk msg : ByteArray) : OracleComp sha512ROSpec ByteArray := do
 /-- Strict-mode `verify` with SHA-512 abstracted as an oracle query.
 Mirrors `verifyWith .strict` from the core module. -/
 def verifyROM (pk sig msg : ByteArray) : OracleComp sha512ROSpec Bool := do
-  if pk.size != 32 ∨ sig.size != 64 then return false
+  if pk.size != 32 || sig.size != 64 then return false
   else
     let encR := sig.extract 0 32
     let sBytes := sig.extract 32 64

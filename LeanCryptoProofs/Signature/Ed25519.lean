@@ -4,9 +4,15 @@ import LeanCrypto.Signature.Ed25519
 /-!
 # Per-vector completeness for Ed25519 (M20 — Path D)
 
-Proves `verify (derivePublicKey sk) (sign sk msg) msg = true` for each of
-the four RFC 8032 §7.1 test vectors as a **machine-checked Lean theorem**,
-using `native_decide`. These are *not* a universal completeness proof —
+Proves `verify (derivePublicKey sk) (sign sk msg) msg = true` for three of
+the four RFC 8032 §7.1 test vectors (TESTs 1, 2, 3) as **machine-checked
+Lean theorems**, using `native_decide`. TEST 1024 (1023-byte message) is
+exercised only at runtime in `Tests/Ed25519Test.lean` — embedding a
+multi-kilobyte hex literal in this module for compile-time `native_decide`
+would balloon the build time without adding meaningful coverage that the
+runtime check doesn't already give.
+
+These are *not* a universal completeness proof —
 that's tracked separately (see `docs/PROOFS_PLAN.md` if/when M22 lands).
 What they give us:
 
@@ -24,13 +30,23 @@ What they give us:
 
 1. Compiling the `Decidable` instance for the goal to native code.
 2. Running it via `Lean.ofReduceBool`.
-3. Asserting `decideInst = true` as a fresh per-theorem axiom.
+3. Asserting the result as a fresh per-theorem axiom *named after the
+   theorem* (e.g. `verify_sign_self_rfc_1._native.native_decide.ax_1_1`).
+   That axiom is defined in terms of `Lean.ofReduceBool` — so the
+   transitive trust base is the standard Lean axioms plus
+   `Lean.ofReduceBool`, which in turn trusts the Lean compiler and every
+   `@[implemented_by]` / `@[extern]` definition in the runtime.
 
-The transitive trust base therefore includes the Lean compiler and
-every `@[implemented_by]` / `@[extern]` definition in the runtime. We
-audit this explicitly with `#print axioms` at the end of the file; the
-goal is that only `propext`, `Classical.choice`, `Quot.sound`, and one
-`_native.native_decide.ax_N` per theorem appear.
+`#print axioms verify_sign_self_rfc_1` on Lean 4.29.0 reports:
+
+```
+[propext, Classical.choice, Quot.sound,
+ verify_sign_self_rfc_1._native.native_decide.ax_1_1]
+```
+
+Reviewers expecting bare `Lean.ofReduceBool` should note: it's the
+transitive dependency of the per-theorem axiom, not the directly-named
+one.
 
 Path C (universal proof of the Edwards group law via `linear_combination`
 in the style of Mathlib's Weierstrass code) is a multi-month effort and
@@ -50,13 +66,13 @@ private def hex! (s : String) : ByteArray :=
   | some b => b
   | none => panic! s!"bad hex literal: {s}"
 
-/-! ## RFC 8032 §7.1 test vectors
+/-! ## RFC 8032 §7.1 short test vectors
 
-Three of the four short vectors are embedded inline. Vector 4 ("TEST 1024",
-1023-byte message) is loaded from `tests/vectors/rfc8032/test1024.msg.hex`
-at runtime in `Tests/Ed25519Test.lean`; carrying it inline here would mean
-a multi-kilobyte hex literal in this file, so its completeness is exercised
-by the runtime test rather than by `native_decide`. -/
+The three short vectors (TESTs 1, 2, 3) are embedded inline below. The
+fourth published vector ("TEST 1024", 1023-byte message) is exercised
+only at runtime in `Tests/Ed25519Test.lean` and is **not** in this
+module's `shortRfcVectors` list — see the file-level docstring for
+rationale. -/
 
 /-- TEST 1: empty message. -/
 def sk_1 : ByteArray := hex!
@@ -87,18 +103,21 @@ theorem verify_sign_self_rfc_3 :
     verify (derivePublicKey sk_3) (sign sk_3 msg_3) msg_3 = true := by
   native_decide
 
-/-- The four vectors as a list — pairs of secret key and message. -/
-def rfcVectors : List (ByteArray × ByteArray) :=
+/-- The three short RFC 8032 §7.1 vectors as a list of `(sk, msg)` pairs.
+TEST 1024 (1023-byte message) is *not* included — it's only exercised at
+runtime; see the file-level docstring. -/
+def shortRfcVectors : List (ByteArray × ByteArray) :=
   [(sk_1, msg_1), (sk_2, msg_2), (sk_3, msg_3)]
 
-/-- Bundled per-vector completeness: every `(sk, msg)` in `rfcVectors`
-self-verifies. Useful as a single hypothesis when discharging the
-weakened wrapper `PerfectlyCompleteOnRfcVectors`. -/
-theorem verify_sign_self_on_rfc_vectors :
-    ∀ p ∈ rfcVectors,
+/-- Bundled per-vector completeness: every `(sk, msg)` in
+`shortRfcVectors` self-verifies. Useful as a single hypothesis when
+discharging the weakened wrapper-level lemma
+`LeanCryptoVCVio.Ed25519Proofs.ed25519_completes_on_rfc_vectors`. -/
+theorem verify_sign_self_on_short_rfc_vectors :
+    ∀ p ∈ shortRfcVectors,
       verify (derivePublicKey p.1) (sign p.1 p.2) p.2 = true := by
   intro p hp
-  simp only [rfcVectors, List.mem_cons, List.not_mem_nil, or_false] at hp
+  simp only [shortRfcVectors, List.mem_cons, List.not_mem_nil, or_false] at hp
   rcases hp with rfl | rfl | rfl
   · exact verify_sign_self_rfc_1
   · exact verify_sign_self_rfc_2

@@ -39,12 +39,12 @@ open LeanCrypto.Field.Fp25519 (Fp p)
 /-- `Fp25519`'s `Nat`-backed `add` casts to plain addition in `ZMod p`. -/
 @[simp] lemma castZMod_fp25519_add (a b : Fp) :
     ((Fp25519.add a b : Nat) : ZMod p) = (a : ZMod p) + (b : ZMod p) := by
-  simp [Fp25519.add, Nat.cast_add, ZMod.natCast_mod, ZMod.natCast_mod]
+  simp [Fp25519.add, Nat.cast_add, ZMod.natCast_mod]
 
 /-- `Fp25519`'s `Nat`-backed `mul` casts to plain multiplication in `ZMod p`. -/
 @[simp] lemma castZMod_fp25519_mul (a b : Fp) :
     ((Fp25519.mul a b : Nat) : ZMod p) = (a : ZMod p) * (b : ZMod p) := by
-  simp [Fp25519.mul, Nat.cast_mul, ZMod.natCast_mod, ZMod.natCast_mod]
+  simp [Fp25519.mul, Nat.cast_mul, ZMod.natCast_mod]
 
 /-! ## Projective equality -/
 

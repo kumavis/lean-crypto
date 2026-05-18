@@ -178,8 +178,10 @@ def main() -> int:
     for algo, msg, chunks, _ in cases:
         cmds_lines.append(f"{algo} {msg.hex()}")
         chunk_hexes = " ".join(c.hex() for c in chunks)
-        # If chunks is empty, we still want a trailing space to keep
-        # `<algo>-chunks` distinct from `<algo>-chunks <hex>`.
+        # `<algo>-chunks` with zero hex args is a valid command: DiffCli's
+        # `"sha256-chunks" :: hexes` pattern matches with `hexes = []`,
+        # which decodes to the digest of the empty message. We emit the
+        # bare form (no trailing space) so command boundaries stay clean.
         if chunks:
             cmds_lines.append(f"{algo}-chunks {chunk_hexes}")
         else:

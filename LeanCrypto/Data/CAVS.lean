@@ -50,7 +50,10 @@ private def stripComments (line : String) : String :=
   let line := line.trimAscii.toString
   if line.isEmpty || line.startsWith "#" || line.startsWith "[" then "" else line
 
-/-- Parse a `*ShortMsg.rsp` / `*LongMsg.rsp` file body. -/
+/-- Parse a `*ShortMsg.rsp` / `*LongMsg.rsp` file body. Errors on any
+unrecognised non-empty line (after stripping comments / section headers
+/ whitespace) so a typo like `Len: 0` (using `:` instead of `=`) is
+caught at parse time rather than silently dropped. -/
 def parseMsgFile (text : String) : Except String (Array MsgRecord) := do
   let mut records : Array MsgRecord := #[]
   let mut len  : Option Nat       := none
@@ -64,7 +67,8 @@ def parseMsgFile (text : String) : Except String (Array MsgRecord) := do
         let k := k.trimAscii.toString
         let v := v.trimAscii.toString
         if k == "Len" then
-          len  := some v.toNat!
+          let some n := v.toNat? | throw s!"Len: bad Nat: {v}"
+          len  := some n
           msgH := none
         else if k == "Msg" then
           msgH := some v
@@ -78,10 +82,12 @@ def parseMsgFile (text : String) : Except String (Array MsgRecord) := do
           records := records.push { lenBits := lenN, msg := msgBytes, md := mdBytes }
           len  := none
           msgH := none
-    | _ => continue
+        else throw s!"parseMsgFile: unknown key {repr k}: {line}"
+    | _ => throw s!"parseMsgFile: unrecognised line (not 'k = v'): {line}"
   return records
 
-/-- Parse a `*Monte.rsp` file body. -/
+/-- Parse a `*Monte.rsp` file body. Errors on any unrecognised non-empty
+line — `COUNT = N` lines are explicitly recognised and skipped. -/
 def parseMonteFile (text : String) : Except String MonteRecord := do
   let mut seed : Option ByteArray := none
   let mut mds  : Array ByteArray := #[]
@@ -99,8 +105,10 @@ def parseMonteFile (text : String) : Except String MonteRecord := do
         else if k == "MD" then
           let some s := hexToBytes v | throw s!"bad MD hex: {v}"
           mds := mds.push s
-        -- ignore "COUNT = N" lines
-    | _ => continue
+        else if k == "COUNT" then
+          pure ()    -- ignored on purpose
+        else throw s!"parseMonteFile: unknown key {repr k}: {line}"
+    | _ => throw s!"parseMonteFile: unrecognised line (not 'k = v'): {line}"
   let some s := seed | throw "Monte file missing Seed"
   return { seed := s, mds := mds }
 

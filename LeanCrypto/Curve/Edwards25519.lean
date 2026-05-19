@@ -102,14 +102,26 @@ def double (p1 : EdPoint) : EdPoint :=
 def negate (p1 : EdPoint) : EdPoint :=
   { X := neg p1.X, Y := p1.Y, Z := p1.Z, T := neg p1.T }
 
+/-- Maximum scalar bit-width handled by `smul`. Every scalar that arises
+naturally in Ed25519 fits in this bound: clamped seeds are `< 2²⁵⁴`, the
+group order `ℓ` is `< 2²⁵³`, and `reduce512Bit` outputs reduce mod `ℓ`. -/
+private def smulMaxBits : Nat := 256
+
 /-- Scalar multiplication via left-to-right double-and-add. Leaks scalar
-timing (see file header). -/
+timing (see file header).
+
+The precondition `n < 2^256` is enforced with a runtime panic. Scalars
+in this library always fit (`s < 2²⁵⁴` post-clamp, `r, k, S < ℓ < 2²⁵³`),
+so this guard is for callers that might pass an un-reduced or
+externally-supplied `Nat`. Silently truncating the high bits would
+return a different point with no diagnostic. -/
 def smul (n : Nat) (p : EdPoint) : EdPoint := Id.run do
   if n == 0 then return identity
-  let bits := 256
+  if n >>> smulMaxBits != 0 then
+    panic! s!"Edwards25519.smul: scalar exceeds 2^{smulMaxBits}"
   let mut acc : EdPoint := identity
-  for i in [:bits] do
-    let bit := (n >>> (bits - 1 - i)) &&& 1
+  for i in [:smulMaxBits] do
+    let bit := (n >>> (smulMaxBits - 1 - i)) &&& 1
     acc := double acc
     if bit == 1 then
       acc := add acc p
@@ -126,8 +138,16 @@ def toAffine (p : EdPoint) : EdAffine :=
 /-! ## Encoding (RFC 8032 §5.1.2 / §5.1.3) -/
 
 /-- Encode `P` as 32 little-endian bytes: `y` in low bits, high bit of
-byte 31 holds the LSB of canonical affine `x`. -/
+byte 31 holds the LSB of canonical affine `x`.
+
+The precondition `P.Z ≠ 0` (i.e. `P` is not a point-at-infinity-style
+exceptional representative) is enforced with a runtime panic. `toAffine`
+uses `inv P.Z`, and Fermat-style `inv 0 = 0` would silently encode the
+zero point. Every `add` / `double` / `smul` output on the in-tree
+inputs has `Z ≠ 0`, so this guard exists to catch external misuse. -/
 def encode (p : EdPoint) : ByteArray := Id.run do
+  if p.Z == 0 then
+    panic! "Edwards25519.encode: point has Z = 0 (exceptional representative)"
   let af := toAffine p
   let mut out := storeU256LE af.y
   let xBit : UInt8 := UInt8.ofNat (af.x % 2)

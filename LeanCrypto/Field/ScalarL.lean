@@ -32,8 +32,15 @@ def L : Nat := 2^252 + 27742317777372353535851937790883648493
 @[inline] def mul (a b : Scalar) : Scalar := (a * b) % L
 
 /-- Read 64 little-endian bytes and reduce mod ℓ. RFC 8032 §5.1.6 uses this
-to convert `SHA-512(...)` outputs into scalars. -/
+to convert `SHA-512(...)` outputs into scalars.
+
+The precondition `b.size = 64` is enforced with a runtime panic. Callers
+in this library always feed SHA-512 output (always 64 bytes); a different
+size would silently compute a value over the wrong bit-width with no
+diagnostic. -/
 def reduce512Bit (b : ByteArray) : Scalar := Id.run do
+  if b.size != 64 then
+    panic! s!"ScalarL.reduce512Bit: b.size = {b.size}, expected 64"
   let mut acc : Nat := 0
   for i in [:b.size] do
     acc := acc ||| ((b.get! i).toNat <<< (i * 8))

@@ -41,13 +41,19 @@ def p : Nat := 2^255 - 19
 @[inline] def mul (a b : Fp) : Fp := (a * b) % p
 @[inline] def square (a : Fp) : Fp := mul a a
 
-/-- Square-and-multiply with a fixed 256-iteration bound. Any exponent we
-care about fits in 256 bits. -/
+/-- Maximum exponent bit-width handled by `pow`. The in-tree callers
+(`inv` with `p − 2 < 2²⁵⁵`, `sqrt` with `(p ± 3) / 8 < 2²⁵²`) all fit
+within this bound. Exponents with more than `powMaxExpBits` significant
+bits would be silently truncated by the loop. -/
+private def powMaxExpBits : Nat := 256
+
+/-- Square-and-multiply with a fixed `powMaxExpBits`-iteration bound. Any
+exponent we care about fits in `2 ^ powMaxExpBits`. -/
 def pow (a : Fp) (e : Nat) : Fp := Id.run do
   let mut result : Fp := 1
   let mut base : Fp := a % p
   let mut exp := e
-  for _ in [:256] do
+  for _ in [:powMaxExpBits] do
     if exp % 2 == 1 then
       result := (result * base) % p
     base := (base * base) % p

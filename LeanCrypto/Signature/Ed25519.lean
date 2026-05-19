@@ -61,28 +61,40 @@ private def projEq (p q : EdPoint) : Bool :=
 
 /-! ## Sign / public-key derivation -/
 
-/-- Derive the 32-byte public key from a 32-byte secret. Behaviour is
-defined only for `sk.size = 32`; other sizes are unsupported (caller
-contract). -/
+/-- Derive the 32-byte public key from a 32-byte secret. The
+precondition `sk.size = 32` is enforced with a runtime panic — passing
+a different length is almost always a caller bug (e.g. confusing the
+32-byte seed with a 64-byte expanded `sk ‖ pk` keypair, a frequent
+cross-library footgun). Refusing loudly is safer than returning a junk
+public key that no peer will verify against. -/
 def derivePublicKey (sk : ByteArray) : ByteArray :=
-  let h := sha512 sk
-  let s := clampScalar (h.extract 0 32)
-  let A := smul s basePoint
-  encode A
+  if sk.size != 32 then
+    panic! s!"Ed25519.derivePublicKey: sk.size = {sk.size}, expected 32"
+  else
+    let h := sha512 sk
+    let s := clampScalar (h.extract 0 32)
+    let A := smul s basePoint
+    encode A
 
-/-- Sign `msg` with secret `sk`. Returns 64 bytes. -/
+/-- Sign `msg` with secret `sk`. Returns 64 bytes.
+
+The precondition `sk.size = 32` is enforced with a runtime panic — see
+`derivePublicKey` for the rationale. -/
 def sign (sk msg : ByteArray) : ByteArray :=
-  let h := sha512 sk
-  let s := clampScalar (h.extract 0 32)
-  let pre := h.extract 32 64
-  let A := smul s basePoint
-  let encA := encode A
-  let r := reduce512Bit (sha512 (pre ++ msg))
-  let R := smul r basePoint
-  let encR := encode R
-  let k := reduce512Bit (sha512 (encR ++ encA ++ msg))
-  let S := addL r (mulL k (reduceL s))
-  encR ++ storeU256LE S
+  if sk.size != 32 then
+    panic! s!"Ed25519.sign: sk.size = {sk.size}, expected 32"
+  else
+    let h := sha512 sk
+    let s := clampScalar (h.extract 0 32)
+    let pre := h.extract 32 64
+    let A := smul s basePoint
+    let encA := encode A
+    let r := reduce512Bit (sha512 (pre ++ msg))
+    let R := smul r basePoint
+    let encR := encode R
+    let k := reduce512Bit (sha512 (encR ++ encA ++ msg))
+    let S := addL r (mulL k (reduceL s))
+    encR ++ storeU256LE S
 
 /-! ## Verify -/
 

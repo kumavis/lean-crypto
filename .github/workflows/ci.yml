@@ -20,7 +20,7 @@ jobs:
             | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      - name: Cache .lake
+      - name: Cache .lake (outer)
         uses: actions/cache@v4
         with:
           path: .lake
@@ -33,7 +33,10 @@ jobs:
           set -e
           ! grep -RInE '^\s*(sorry|partial def|unsafe def|@\[extern[^]]*\])\b' \
               --include='*.lean' \
-              LeanCrypto LeanCryptoVCVio LeanCryptoProofs Tests
+              LeanCrypto Tests \
+              packages/lean-crypto-vcvio/LeanCryptoVCVio \
+              packages/lean-crypto-vcvio/LeanCryptoProofs \
+              packages/lean-crypto-vcvio/Tests
           echo "OK no forbidden tokens"
 
       - name: Core LeanCrypto stays Mathlib/VCVio-free
@@ -43,27 +46,14 @@ jobs:
               --include='*.lean' \
               LeanCrypto LeanCrypto.lean
           echo "OK no Mathlib/VCVio imports in core"
+          # And the outer lakefile must have no Mathlib/VCVio require lines.
+          ! grep -E 'mathlib|VCVio' lakefile.lean
+          echo "OK outer lakefile has no Mathlib/VCVio deps"
 
-      - name: Resolve dependencies (lake update)
+      - name: Build core (LeanCrypto + all core test exes)
         run: |
           set -ex
-          lake update 2>&1 | tee /tmp/lake-update.log | tail -40 || {
-            echo "## lake update failed" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            tail -200 /tmp/lake-update.log >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          }
-
-      - name: Build core (LeanCrypto + non-VCVio test exes)
-        run: |
-          set -ex
-          TARGETS="LeanCrypto Tests.HelloTest Tests.BytesTest \
-                   Tests.Sha256Test Tests.Sha512Test \
-                   Tests.Fp25519Test Tests.ScalarLTest \
-                   Tests.Edwards25519Test Tests.Ed25519Test \
-                   Tests.WycheproofTest Tests.DiffCli"
-          if ! lake build $TARGETS 2>&1 | tee /tmp/build-core.log; then
+          if ! lake build 2>&1 | tee /tmp/build-core.log; then
             {
               echo "## Build core failed (last 200 lines)"
               echo '```'
@@ -81,10 +71,8 @@ jobs:
           for exe in .lake/build/bin/*; do
             [ -x "$exe" ] && [ -f "$exe" ] || continue
             # Skip the request/response CLI — driven by the diff step below.
-            # Skip Tests-VCVio-* — exercised in the vcvio-build job.
             case "$(basename "$exe")" in
               Tests-DiffCli) continue;;
-              Tests-VCVio-*) continue;;
             esac
             echo "::group::$(basename "$exe")"
             if ! "$exe"; then
@@ -110,24 +98,28 @@ jobs:
 
   vcvio-build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/lean-crypto-vcvio
     steps:
       - uses: actions/checkout@v4
 
       - name: Install elan
+        working-directory: .
         run: |
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      - name: Cache .lake (vcvio variant — keyed independently from core)
+      - name: Cache .lake (vcvio nested package, keyed independently)
         uses: actions/cache@v4
         with:
-          path: .lake
-          key: lake-vcvio-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'lake-manifest.json') }}
+          path: packages/lean-crypto-vcvio/.lake
+          key: lake-vcvio-${{ runner.os }}-${{ hashFiles('packages/lean-crypto-vcvio/lean-toolchain', 'packages/lean-crypto-vcvio/lakefile.lean', 'packages/lean-crypto-vcvio/lake-manifest.json') }}
           restore-keys: |
             lake-vcvio-${{ runner.os }}-
 
-      - name: Resolve dependencies (lake update)
+      - name: Resolve dependencies (lake update — Mathlib + VCV-io)
         run: |
           set -ex
           if ! lake update 2>&1 | tee /tmp/lake-update.log; then
@@ -156,41 +148,20 @@ jobs:
       - name: Fetch VCV-io submodules (ML-KEM / ML-DSA / Falcon native C)
         run: |
           set -ex
-          # lake update has cloned VCVio into .lake/packages/VCVio; init its submodules.
           git -C .lake/packages/VCVio submodule update --init --depth 1
 
       - name: Build LeanCryptoVCVio + LeanCryptoProofs + Tests.VCVio.*
         run: |
           set -ex
-          if ! lake build LeanCryptoVCVio 2>&1 | tee /tmp/build-vcvio.log; then
-            {
-              echo "## lake build LeanCryptoVCVio failed (last 300 lines)"
-              echo '```'
-              tail -300 /tmp/build-vcvio.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          # Build the proofs library too — it depends on Mathlib so it belongs
-          # in this job, not the core build job. Without this, regressions in
-          # the linear_combination / native_decide proofs land silently.
-          if ! lake build LeanCryptoProofs 2>&1 | tee /tmp/build-proofs.log; then
-            {
-              echo "## lake build LeanCryptoProofs failed (last 300 lines)"
-              echo '```'
-              tail -300 /tmp/build-proofs.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          for tgt in Tests.VCVio.Smoke Tests.VCVio.Hash \
+          for tgt in LeanCryptoVCVio LeanCryptoProofs \
+                     Tests.VCVio.Smoke Tests.VCVio.Hash \
                      Tests.VCVio.Ed25519Det Tests.VCVio.Ed25519ROM \
                      Tests.VCVio.GameSmoke; do
             if ! lake build "$tgt" 2>&1 | tee /tmp/build-$tgt.log; then
               {
-                echo "## lake build $tgt failed (last 200 lines)"
+                echo "## lake build $tgt failed (last 300 lines)"
                 echo '```'
-                tail -200 /tmp/build-$tgt.log
+                tail -300 /tmp/build-$tgt.log
                 echo '```'
               } >> "$GITHUB_STEP_SUMMARY"
               exit 1

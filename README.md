@@ -122,11 +122,28 @@ snapshot is documented in `tests/vectors/wycheproof/SOURCE.md`.
 
 ## VCV-io integration (optional)
 
-A separate `LeanCryptoVCVio` library lifts the SHA-256/SHA-512/Ed25519
+The `LeanCryptoVCVio` library lifts the SHA-256/SHA-512/Ed25519
 primitives into [VCV-io](https://github.com/dtumad/VCV-io)'s `OracleComp`
-framework so they plug into game-based crypto proofs. The core
-`LeanCrypto` library stays Mathlib-free; the wrapper takes Mathlib +
-VCV-io as dependencies only inside its own `lean_lib` target.
+framework so they plug into game-based crypto proofs. It lives in a
+**nested Lake package** at `packages/lean-crypto-vcvio/`, separate from
+the core. The outer `lean-crypto` package carries no Mathlib dependency,
+so consumers needing only the pure-Lean primitives pay none of the
+wrapper's build cost.
+
+Consuming the wrapper from another project:
+
+```lean
+require «lean-crypto-vcvio» from git
+  "https://github.com/kumavis/lean-crypto" @ "main" with
+  subDir := "packages/lean-crypto-vcvio"
+```
+
+Consuming just the core:
+
+```lean
+require «lean-crypto» from git
+  "https://github.com/kumavis/lean-crypto" @ "main"
+```
 
 ```lean
 import LeanCryptoVCVio
@@ -167,10 +184,11 @@ What the wrapper does *not* ship:
   the runtime smoke test (`Tests/VCVio/GameSmoke.lean`) drives a
   hand-built parallel game body through `simulateQ` instead.
 
-## Proof track (`LeanCryptoProofs/`)
+## Proof track (`packages/lean-crypto-vcvio/LeanCryptoProofs/`)
 
-A third `lean_lib LeanCryptoProofs` carries the algebraic foundations
-work (also depends on Mathlib; also opt-in). Highlights from M19–M24:
+A `lean_lib LeanCryptoProofs` inside the nested wrapper package carries
+the algebraic-foundations work (also depends on Mathlib; also opt-in).
+Highlights from M19–M24:
 
 ```lean
 import LeanCryptoProofs
@@ -205,14 +223,16 @@ for the post-mortem and the three possible paths if anyone ever
 comes back to it.
 
 CI runs the wrapper build + tests in a separate `vcvio-build` job that
-restores Mathlib's precompiled olean cache via `lake exe cache get`.
+runs from `packages/lean-crypto-vcvio/` and restores Mathlib's
+precompiled olean cache via `lake exe cache get`.
 
 ```sh
 # Build the wrapper and its tests locally (downloads Mathlib + VCV-io
 # on first run; subsequent builds use cached oleans):
+cd packages/lean-crypto-vcvio
 lake update
-git -C .lake/packages/VCVio submodule update --init --depth 1
 lake exe cache get
+git -C .lake/packages/VCVio submodule update --init --depth 1
 lake build LeanCryptoVCVio
 for exe in .lake/build/bin/Tests-VCVio-*; do "$exe"; done
 ```

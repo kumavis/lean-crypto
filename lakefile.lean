@@ -1,10 +1,22 @@
 import Lake
 open Lake DSL
 
-require "leanprover-community" / "mathlib" @ git "v4.29.0"
+/-! `lean-crypto` — pure Lean 4 SHA-256/512 + Ed25519, no external deps.
 
-require VCVio from git
-  "https://github.com/dtumad/VCV-io" @ "v4.29.0"
+This package has **zero** dependencies beyond the Lean toolchain itself.
+Consumers (e.g. `lean-ocapn`) can depend on this directly without
+pulling Mathlib or VCV-io into their build:
+
+```
+require «lean-crypto» from git
+  "https://github.com/kumavis/lean-crypto" @ "main"
+```
+
+The optional VCV-io wrapper and the algebraic-foundations proof track
+live in the **nested package** at `packages/lean-crypto-vcvio/`, which
+*does* depend on Mathlib + VCV-io. See that directory's lakefile and
+`docs/VCV_IO_PLAN.md` / `docs/PROOFS_ROADMAP.md`.
+-/
 
 package «lean-crypto» where
   -- no package-level options yet
@@ -13,12 +25,6 @@ package «lean-crypto» where
 lean_lib LeanCrypto where
   buildType := BuildType.release
   moreLeancArgs := #["-O3"]
-
-lean_lib LeanCryptoVCVio where
-  buildType := BuildType.release
-
-lean_lib LeanCryptoProofs where
-  buildType := BuildType.release
 
 lean_exe Tests.HelloTest
 
@@ -39,13 +45,3 @@ lean_exe Tests.Ed25519Test
 lean_exe Tests.WycheproofTest
 
 lean_exe Tests.DiffCli
-
-lean_exe Tests.VCVio.Smoke
-
-lean_exe Tests.VCVio.Hash
-
-lean_exe Tests.VCVio.Ed25519Det
-
-lean_exe Tests.VCVio.Ed25519ROM
-
-lean_exe Tests.VCVio.GameSmoke

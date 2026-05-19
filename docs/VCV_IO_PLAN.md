@@ -42,39 +42,56 @@ library keeps its zero-dependency posture.
 
 ## 2. Module layout
 
+After the package split (post-M18), all wrapper modules live in the
+nested Lake package at `packages/lean-crypto-vcvio/`:
+
 ```
-LeanCryptoVCVio.lean                  -- root re-exports
-LeanCryptoVCVio/
-  Prelude.lean                        -- VCV-io / Mathlib opens, drawBytes helper
-  Hash/
-    SHA256.lean                       -- sha256OC : ByteArray → OracleComp []ₒ ByteArray
-    SHA512.lean                       -- sha512OC + ROM-shape signature alias
-  Signature/
-    Ed25519.lean                      -- SignatureAlg, deterministic SHA-512
-    Ed25519ROM.lean                   -- SignatureAlg, SHA-512 modeled as RandomOracle
-  Games/
-    Smoke.lean                        -- UFCMA exp with trivial adv; sanity-only
-Tests/VCVio/
-  Hash.lean                           -- simulateQ ∘ sha256OC = LeanCrypto.sha256
-  Ed25519Det.lean                     -- RFC 8032 §7.1 vector through SignatureAlg
-  Ed25519ROM.lean                     -- PerfectlyComplete + smoke
-  GameSmoke.lean                      -- trivial-adv UFCMA exp evaluates to false
+packages/lean-crypto-vcvio/
+├── lakefile.lean                       -- requires lean-crypto (../..) + Mathlib + VCV-io
+├── LeanCryptoVCVio.lean                -- root re-exports
+├── LeanCryptoVCVio/
+│   ├── Prelude.lean                    -- VCV-io / Mathlib opens, drawBytes helper
+│   ├── Hash/
+│   │   ├── SHA256.lean                 -- sha256OC : ByteArray → OracleComp spec ByteArray
+│   │   └── SHA512.lean                 -- sha512OC
+│   ├── Signature/
+│   │   ├── Ed25519.lean                -- SignatureAlg, deterministic SHA-512
+│   │   └── Ed25519ROM.lean             -- ROM building blocks (signROM, etc.)
+│   └── Games/
+│       └── Smoke.lean                  -- UFCMA exp with trivial adv; sanity-only
+├── LeanCryptoProofs.lean               -- root re-exports for proofs
+├── LeanCryptoProofs/                   -- M19-M24 algebraic foundations
+└── Tests/VCVio/
+    ├── Hash.lean                       -- simulateQ ∘ sha256OC = LeanCrypto.sha256
+    ├── Ed25519Det.lean                 -- RFC 8032 §7.1 vector through SignatureAlg
+    ├── Ed25519ROM.lean                 -- ROM Ed25519 with honest sha512 oracle
+    ├── GameSmoke.lean                  -- trivial-adv UFCMA exp evaluates to false
+    └── Smoke.lean                      -- M13 dep-wiring smoke
 ```
+
+The outer `lean-crypto` package keeps zero deps; consumers of the
+wrapper require this inner package via Lake's git `subDir` syntax.
 
 ---
 
 ## 3. Lakefile / dependencies
 
+The wrapper lives in its own Lake package. Its `lakefile.lean`:
+
 ```lean
+require «lean-crypto» from ".." / ".."   -- relative to repo root in monorepo
 require "leanprover-community" / "mathlib" @ git "v4.29.0"
 require VCVio from git "https://github.com/dtumad/VCV-io" @ "v4.29.0"
 
-lean_lib LeanCryptoVCVio where
-  buildType := BuildType.release
+package «lean-crypto-vcvio» where
+lean_lib LeanCryptoVCVio where ...
 ```
 
+The outer `lean-crypto` lakefile has **no Mathlib or VCV-io requires** —
+consumers depending only on the core get a clean dep tree.
+
 VCV-io tags a release matching each Mathlib bump (we use `v4.29.0`). Bumps
-land via lakefile edits + `lake update`.
+land via lakefile edits + `lake update` in the inner package.
 
 ---
 

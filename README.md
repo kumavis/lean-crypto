@@ -73,10 +73,16 @@ curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh 
 # Build (downloads the pinned toolchain on first run)
 lake build
 
-# Run every test executable
+# Run every test executable; fail the loop on the first non-zero exit.
+fail=0
 for exe in .lake/build/bin/*; do
-  [ -x "$exe" ] && [ -f "$exe" ] && "$exe" || true
+  [ -x "$exe" ] && [ -f "$exe" ] || continue
+  if ! "$exe"; then
+    echo "FAIL: $(basename "$exe")" >&2
+    fail=1
+  fi
 done
+exit "$fail"
 ```
 
 The CI workflow in `.github/workflows/ci.yml` does the same.

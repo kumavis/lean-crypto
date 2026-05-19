@@ -75,9 +75,14 @@ def parseMsgFile (text : String) : Except String (Array MsgRecord) := do
         else if k == "MD" then
           let some lenN := len     | throw s!"MD without Len: {line}"
           let some msgX := msgH    | throw s!"MD without Msg: {line}"
-          let msgBytes :=
-            if lenN == 0 then ByteArray.empty
-            else (hexToBytes msgX).getD ByteArray.empty
+          let msgBytes ← (do
+            if lenN == 0 then
+              -- CAVS convention: zero-length input is encoded as `Msg = 00`.
+              -- Don't try to decode the literal; just emit empty bytes.
+              return ByteArray.empty
+            match hexToBytes msgX with
+            | some bs => return bs
+            | none    => throw s!"bad Msg hex: {msgX}")
           let some mdBytes := hexToBytes v | throw s!"bad MD hex: {v}"
           records := records.push { lenBits := lenN, msg := msgBytes, md := mdBytes }
           len  := none

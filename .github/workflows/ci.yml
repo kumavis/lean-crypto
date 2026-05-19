@@ -47,8 +47,11 @@ jobs:
               LeanCrypto LeanCrypto.lean
           echo "OK no Mathlib/VCVio imports in core"
           # And the outer lakefile must have no Mathlib/VCVio require lines.
-          ! grep -E 'mathlib|VCVio' lakefile.lean
-          echo "OK outer lakefile has no Mathlib/VCVio deps"
+          # Restrict to actual require statements (case-insensitive on the
+          # dep name) so the surrounding docstring mentioning Mathlib /
+          # VCV-io doesn't trip the guard.
+          ! grep -InE '^\s*require\b.*(mathlib|VCVio)' lakefile.lean
+          echo "OK outer lakefile has no Mathlib/VCVio require lines"
 
       - name: Build core (LeanCrypto + all core test exes)
         run: |

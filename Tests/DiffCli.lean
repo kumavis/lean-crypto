@@ -35,12 +35,9 @@ private def hexOr (label : String) (s : String) (k : ByteArray → String) : Str
   | some b => k b
   | none => s!"ERR bad-hex({label}): {s}"
 
-/-- Decode a list of hex chunks; returns `none` on first bad chunk. -/
+/-- Decode a list of hex chunks; returns `none` on the first bad chunk. -/
 private def hexChunks (hexes : List String) : Option (List ByteArray) :=
-  hexes.foldr (init := some []) fun h acc => do
-    let bs ← hexToBytes h
-    let rest ← acc
-    return bs :: rest
+  hexes.mapM hexToBytes
 
 /-- SHA-256 over a sequence of chunks via the streaming API. -/
 private def sha256Streaming (chunks : List ByteArray) : ByteArray :=

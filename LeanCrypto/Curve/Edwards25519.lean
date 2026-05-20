@@ -177,7 +177,13 @@ def decode (bs : ByteArray) : Option EdPoint := do
     if cv == u then some candidate
     else if cv == neg u then some (mul candidate sqrtM1)
     else none
+  -- RFC 8032 §5.1.3 step 5: when `x = 0`, the sign bit must be 0
+  -- (otherwise the encoding is non-canonical and decode rejects).
   if x == 0 ∧ signBit == 1 then none
+  -- Once `x = 0` with `signBit = 1` is rejected, the remaining branch
+  -- handles `x ≠ 0` (pick `x` or `-x` so the parity matches `signBit`)
+  -- and `x = 0 ∧ signBit = 0` (then `-x = 0 = x` and either branch
+  -- returns the same point — `neg 0 = 0` in `Fp25519`).
   let x := if (UInt8.ofNat (x % 2)) == signBit then x else neg x
   some { X := x, Y := y, Z := 1, T := mul x y }
 

@@ -5,15 +5,23 @@ open LeanCrypto.Bytes
 /-! M2 test runner for `LeanCrypto.Bytes`.
 
 Prints `OK <N> vectors` on success; on first failure prints
-`FAIL <msg>` and exits 1. Uses the panicky `!` load variants throughout
-so we don't fight proof obligations on freshly-built buffers. -/
+`FAIL <msg>` (with the index at which the first failure occurred and
+the total checks run) and exits 1. Uses the panicky `!` load variants
+throughout so we don't fight proof obligations on freshly-built
+buffers. -/
 
-abbrev TestM := StateM (Nat × Option String)
+/-- State: `(totalChecksRun, firstFailure?)` where `firstFailure` records
+both the index (1-based) at which the first failure was detected and
+the failure message. Subsequent `ok` / `fail` calls still increment
+`totalChecksRun` but leave `firstFailure` alone, so the final report
+can distinguish "where did the first failure occur" from "how many
+checks ran in total". -/
+abbrev TestM := StateM (Nat × Option (Nat × String))
 
 def ok : TestM Unit := modify fun (n, e) => (n + 1, e)
 
 def fail (msg : String) : TestM Unit :=
-  modify fun (n, e) => (n, e.orElse (fun () => some msg))
+  modify fun (n, e) => (n + 1, e.orElse (fun () => some (n + 1, msg)))
 
 def checkEq [BEq α] [ToString α] (name : String) (expected actual : α) : TestM Unit :=
   if expected == actual then ok
@@ -81,8 +89,8 @@ def tests : TestM Unit := do
 def main : IO UInt32 := do
   let ((), (n, err)) := tests.run (0, none)
   match err with
-  | some msg =>
-      IO.eprintln s!"FAIL {msg} (after {n} passing)"
+  | some (failIdx, msg) =>
+      IO.eprintln s!"FAIL at check #{failIdx} of {n}: {msg}"
       return 1
   | none =>
       IO.println s!"OK {n} vectors"

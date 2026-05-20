@@ -6,7 +6,11 @@ and [`noble-ed25519`](https://github.com/paulmillr/noble-ed25519) references
 and the standard test suites — FIPS 180-4 / NIST CAVP, RFC 8032 §7.1,
 and Project Wycheproof (`testvectors_v1/ed25519_test.json`).
 
-* **Status:** v1 complete (M1–M11). Optional VCV-io wrapper layered on top (M12–M18).
+* **Status:** v1 complete (M1–M11). Optional VCV-io wrapper layered on top
+  (M12–M18), algebraic-foundations proof track (M19–M24), and a packaging
+  split moving the Mathlib-dependent pieces into a nested
+  `packages/lean-crypto-vcvio/` package. Per-RFC-vector completeness
+  landed via `native_decide`; universal proof deferred.
 * **Toolchain:** pinned to `leanprover/lean4:v4.29.0`.
 * **Core dependencies:** none — no Mathlib, no std4/batteries, no FFI.
 * **Wrapper dependencies (opt-in):** Mathlib 4.29.0 + VCV-io 4.29.0, used only
@@ -66,11 +70,17 @@ let sig := Ed25519.sign sk msg
 
 ## Building
 
+`lake build` from the repo root builds **only the core** `lean-crypto`
+package — no Mathlib clone, no VCV-io clone. The optional wrapper +
+proofs live in a separate Lake package under `packages/lean-crypto-vcvio/`
+and require their own `lake update` + `lake exe cache get` step (see the
+[VCV-io integration](#vcv-io-integration-optional) section below).
+
 ```sh
 # One-time: install elan (Lean toolchain manager)
 curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh
 
-# Build (downloads the pinned toolchain on first run)
+# Core build only (no Mathlib). Downloads the pinned toolchain on first run.
 lake build
 
 # Run every test executable; fail the loop on the first non-zero exit.

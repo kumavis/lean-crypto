@@ -44,10 +44,10 @@ def runMonteSha256 (seed : ByteArray) : Array ByteArray := Id.run do
   return out
 
 def runMsgFile (label : String) (path : System.FilePath)
-    (chunkSizes : List Nat) (nPass : Nat) : IO (Except (String × Nat) Nat) := do
+    (chunkSizes : List Nat) (passSoFar : Nat) : IO (Except (String × Nat) Nat) := do
   let text ← IO.FS.readFile path
   let records ← IO.ofExcept (parseMsgFile text)
-  let mut nPass := nPass
+  let mut nPass := passSoFar
   for i in [:records.size] do
     let r := records[i]!
     -- One-shot

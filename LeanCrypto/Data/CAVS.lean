@@ -46,9 +46,15 @@ structure MonteRecord where
   mds  : Array ByteArray
   deriving Inhabited
 
-private def stripComments (line : String) : String :=
-  let line := line.trimAscii.toString
-  if line.isEmpty || line.startsWith "#" || line.startsWith "[" then "" else line
+/-- Strip a comment / section header / blank line, returning `none` for
+lines the caller should skip entirely. Operates on the `Substring`
+returned by `trimAscii` and only allocates a fresh `String` for lines
+the caller will keep — avoids per-line `String` allocation on
+multi-megabyte vector files. -/
+private def stripComments (line : String) : Option String :=
+  let s := line.trimAscii
+  if s.isEmpty || s.startsWith "#" || s.startsWith "[" then none
+  else some s.toString
 
 /-- Parse a `*ShortMsg.rsp` / `*LongMsg.rsp` file body. Errors on any
 unrecognised non-empty line (after stripping comments / section headers
@@ -59,8 +65,7 @@ def parseMsgFile (text : String) : Except String (Array MsgRecord) := do
   let mut len  : Option Nat       := none
   let mut msgH : Option String    := none
   for raw in text.splitOn "\n" do
-    let line := stripComments raw
-    if line.isEmpty then continue
+    let some line := stripComments raw | continue
     let parts := line.splitOn "="
     match parts with
     | [k, v] =>
@@ -97,8 +102,7 @@ def parseMonteFile (text : String) : Except String MonteRecord := do
   let mut seed : Option ByteArray := none
   let mut mds  : Array ByteArray := #[]
   for raw in text.splitOn "\n" do
-    let line := stripComments raw
-    if line.isEmpty then continue
+    let some line := stripComments raw | continue
     let parts := line.splitOn "="
     match parts with
     | [k, v] =>

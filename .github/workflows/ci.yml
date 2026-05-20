@@ -1,0 +1,188 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install elan
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache .lake (outer)
+        uses: actions/cache@v4
+        with:
+          path: .lake
+          key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'lake-manifest.json') }}
+          restore-keys: |
+            lake-${{ runner.os }}-
+
+      - name: Forbidden tokens (no sorry / partial / unsafe / extern)
+        run: |
+          set -e
+          ! grep -RInE '^\s*(sorry|partial def|unsafe def|@\[extern[^]]*\])\b' \
+              --include='*.lean' \
+              LeanCrypto Tests \
+              packages/lean-crypto-vcvio/LeanCryptoVCVio \
+              packages/lean-crypto-vcvio/LeanCryptoProofs \
+              packages/lean-crypto-vcvio/Tests
+          echo "OK no forbidden tokens"
+
+      - name: Core LeanCrypto stays Mathlib/VCVio-free
+        run: |
+          set -e
+          ! grep -RInE '^\s*import\s+(Mathlib|VCVio)\b' \
+              --include='*.lean' \
+              LeanCrypto LeanCrypto.lean
+          echo "OK no Mathlib/VCVio imports in core"
+          # And the outer lakefile must have no Mathlib/VCVio require lines.
+          # Restrict to actual require statements (case-insensitive on the
+          # dep name) so the surrounding docstring mentioning Mathlib /
+          # VCV-io doesn't trip the guard.
+          ! grep -InE '^\s*require\b.*(mathlib|VCVio)' lakefile.lean
+          echo "OK outer lakefile has no Mathlib/VCVio require lines"
+
+      - name: Build core (LeanCrypto + all core test exes)
+        run: |
+          set -ex
+          if ! lake build 2>&1 | tee /tmp/build-core.log; then
+            {
+              echo "## Build core failed (last 200 lines)"
+              echo '```'
+              tail -200 /tmp/build-core.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Run core test executables
+        run: |
+          set -e
+          shopt -s nullglob
+          fail=0
+          for exe in .lake/build/bin/*; do
+            [ -x "$exe" ] && [ -f "$exe" ] || continue
+            # Skip the request/response CLI — driven by the diff step below.
+            case "$(basename "$exe")" in
+              Tests-DiffCli) continue;;
+            esac
+            echo "::group::$(basename "$exe")"
+            if ! "$exe"; then
+              echo "::error::$(basename "$exe") exited non-zero"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$fail"
+
+      - name: Differential fuzz (Lean vs Python hashlib + Node ed25519)
+        run: |
+          set -ex
+          if ! ./tests/diff/run.sh 2>&1 | tee /tmp/fuzz.log; then
+            {
+              echo "## Differential fuzz failed (last 200 lines)"
+              echo '```'
+              tail -200 /tmp/fuzz.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+  vcvio-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/lean-crypto-vcvio
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install elan
+        working-directory: .
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache .lake (vcvio nested package, keyed independently)
+        uses: actions/cache@v4
+        with:
+          path: packages/lean-crypto-vcvio/.lake
+          key: lake-vcvio-${{ runner.os }}-${{ hashFiles('packages/lean-crypto-vcvio/lean-toolchain', 'packages/lean-crypto-vcvio/lakefile.lean', 'packages/lean-crypto-vcvio/lake-manifest.json') }}
+          restore-keys: |
+            lake-vcvio-${{ runner.os }}-
+
+      - name: Resolve dependencies (lake update — Mathlib + VCV-io)
+        run: |
+          set -ex
+          if ! lake update 2>&1 | tee /tmp/lake-update.log; then
+            {
+              echo "## lake update failed (last 200 lines)"
+              echo '```'
+              tail -200 /tmp/lake-update.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Fetch Mathlib precompiled olean cache
+        run: |
+          set -ex
+          if ! lake exe cache get 2>&1 | tee /tmp/cache-get.log; then
+            {
+              echo "## lake exe cache get failed (last 200 lines)"
+              echo '```'
+              tail -200 /tmp/cache-get.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Fetch VCV-io submodules (ML-KEM / ML-DSA / Falcon native C)
+        run: |
+          set -ex
+          git -C .lake/packages/VCVio submodule update --init --depth 1
+
+      - name: Build LeanCryptoVCVio + LeanCryptoProofs + Tests.VCVio.*
+        run: |
+          set -ex
+          for tgt in LeanCryptoVCVio LeanCryptoProofs \
+                     Tests.VCVio.Smoke Tests.VCVio.Hash \
+                     Tests.VCVio.Ed25519Det Tests.VCVio.Ed25519ROM \
+                     Tests.VCVio.GameSmoke; do
+            if ! lake build "$tgt" 2>&1 | tee /tmp/build-$tgt.log; then
+              {
+                echo "## lake build $tgt failed (last 300 lines)"
+                echo '```'
+                tail -300 /tmp/build-$tgt.log
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          done
+
+      - name: Run Tests-VCVio-* executables
+        run: |
+          set -e
+          shopt -s nullglob
+          fail=0
+          for exe in .lake/build/bin/Tests-VCVio-*; do
+            [ -x "$exe" ] && [ -f "$exe" ] || continue
+            echo "::group::$(basename "$exe")"
+            if ! "$exe"; then
+              echo "::error::$(basename "$exe") exited non-zero"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$fail"

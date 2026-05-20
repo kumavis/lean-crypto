@@ -1,5 +1,13 @@
 # `lean-crypto` — Plan
 
+> **Historical document.** Written before any code was; the v1 milestones
+> M1–M11 followed this. The library has since been extended with a
+> VCV-io wrapper (M12–M18, see `docs/VCV_IO_PLAN.md`) and an
+> algebraic-foundations proof track (M19–M24, see
+> `docs/PROOFS_ROADMAP.md`). Toolchain was bumped from the
+> originally-planned `v4.27.0` to `v4.29.0` in M12 to match VCV-io's
+> tagged release.
+
 Pure Lean 4 implementation of SHA-256 and Ed25519, validated bit-for-bit against
 [`noble-hashes`](https://github.com/paulmillr/noble-hashes) and
 [`noble-ed25519`](https://github.com/paulmillr/noble-ed25519) and against
